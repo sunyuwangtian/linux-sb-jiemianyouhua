@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.5.0
+// @version      0.6.3
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -10,17 +10,158 @@
 // @grant        GM_addStyle
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @run-at       document-idle
+// @run-at       document-start
 // ==/UserScript==
 
 (function () {
   'use strict';
 
   const NS = 'lsb-modern';
+  const BOOTING_CLASS = `${NS}--booting`;
   let scheduled = false;
   let disabled = false;
   let observer = null;
   let route = `${location.pathname}${location.search}`;
+  let bootPending = true;
+  let notificationHrefSnapshot = '';
+
+  // Apply the theme marker before the first paint so the native layout never flashes.
+  document.documentElement?.classList.add(NS, BOOTING_CLASS);
+  const bootSafetyTimer = window.setTimeout(() => {
+    bootPending = false;
+    document.documentElement?.classList.remove(BOOTING_CLASS);
+  }, 2500);
+
+  function finishBoot() {
+    bootPending = false;
+    window.clearTimeout(bootSafetyTimer);
+    document.documentElement?.classList.remove(BOOTING_CLASS);
+  }
+
+  const normalizeLinkLabel = (value) => String(value || '').replace(/\s+/g, '').trim();
+
+  const isUsableHref = (href) => Boolean(
+    href && href !== '#' && !/^(?:javascript|data):/i.test(href)
+  );
+
+  function nativeAnchors(selector = 'a[href]') {
+    return [...document.querySelectorAll(selector)].filter((link) => {
+      const href = link.getAttribute('href');
+      return isUsableHref(href) && !link.closest(`.${NS}__left,.${NS}__top-actions,.${NS}__user-dropdown,.${NS}__footer,.${NS}__card-heading`);
+    });
+  }
+
+  function findNativeHref(labels, selector = 'a[href]') {
+    const wanted = (Array.isArray(labels) ? labels : [labels]).map(normalizeLinkLabel);
+    const links = nativeAnchors(selector);
+    const exact = links.find((link) => wanted.includes(normalizeLinkLabel(link.textContent)));
+    const match = exact || links.find((link) => {
+      const text = normalizeLinkLabel(link.textContent).replace(/[\d,.]+$/, '');
+      return wanted.includes(text);
+    });
+    return match?.getAttribute('href') || '';
+  }
+
+  function currentUserHref() {
+    const link = nativeAnchors('.nav-mine[href],.user-card a[href],.user-header a[href],a.user-name[href]')
+      .find((item) => /(?:\/user\/\d+|[?&]a=user(?:&|&amp;)id=\d+)/.test(item.getAttribute('href') || ''));
+    return link?.getAttribute('href') || '';
+  }
+
+  function userTabHref(tab) {
+    const userHref = currentUserHref();
+    if (!userHref) return '';
+    try {
+      const url = new URL(userHref, location.origin);
+      url.searchParams.set('tab', tab);
+      return `${url.pathname}${url.search}`;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function routeHref(name) {
+    const routes = {
+      home: () => findNativeHref(['全部主题', '全部']) || '/',
+      featured: () => findNativeHref(['精华', '精选']) || '/topic_featured',
+      technology: () => findNativeHref('技术交流', '.forum-link[href],a[href*="/forum/"]') || '/forum/4',
+      resources: () => findNativeHref('资源分享', '.forum-link[href],a[href*="/forum/"]') || '/forum/3',
+      questions: () => findNativeHref('求助问答', '.forum-link[href],a[href*="/forum/"]') || '/forum/5',
+      announcements: () => findNativeHref('社区公告', '.forum-link[href],a[href*="/forum/"]') || '/forum/9',
+      leaderboard: () => findNativeHref('用户榜单') || '/leaderboard',
+      topics: () => findNativeHref(['我的主题', '主题'], '.user-card a[href],.user-menu a[href],.user-actions a[href]') || userTabHref('topics'),
+      replies: () => findNativeHref(['我的回复', '我的回帖', '回复'], '.user-card a[href],.user-menu a[href],.user-actions a[href]') || userTabHref('replies'),
+      favorites: () => findNativeHref(['我的收藏', '收藏'], '.user-card a[href],.user-menu a[href],.user-actions a[href]') || userTabHref('favorites'),
+      points: () => findNativeHref(['我的积分', '积分明细', '积分'], '.user-card a[href],.user-menu a[href],.nav-mine-menu a[href],.user-actions a[href],.user-links a[href],.feature-links a[href]') || userTabHref('points'),
+      notifications: () => findNativeHref(['我的通知', '通知', '我的消息'], '.user-card a[href],.user-menu a[href],.user-actions a[href],.nav-mine-menu a[href],.user-links a[href],.feature-links a[href]') || userTabHref('notifications'),
+      profile: () => findNativeHref(['个人设置', '编辑资料'], '.user-menu a[href],.nav-mine-menu a[href]') || (currentUserHref() ? '/profile' : ''),
+      invite: () => findNativeHref(['邀请中心', '邀请码'], '.user-menu a[href],.nav-mine-menu a[href],.quick-actions a[href]'),
+      logout: () => findNativeHref('退出登录', '.user-menu a[href],.nav-mine-menu a[href],a[href*="logout"]'),
+      login: () => findNativeHref('登录', 'a[href*="login"]') || '/login',
+      newTopic: () => findNativeHref(['发布新帖', '发帖'], 'a[href]') || '/topic_edit'
+    };
+    return routes[name]?.() || '';
+  }
+
+  function isNotificationHref(href = location.href) {
+    try {
+      const url = new URL(href, location.origin);
+      return url.searchParams.get('tab') === 'notifications'
+        || /(?:^|\/)notifications\/?$/.test(url.pathname);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function clearNotificationState() {
+    document.querySelectorAll(`.${NS}__top-actions .${NS}__badge-dot`).forEach((badge) => badge.remove());
+    document.querySelectorAll('.user-links .notify-badge,.feature-links .notify-badge,.nav-mine .notify-badge,.user-menu .notify-badge,.nav-mine-menu .notify-badge')
+      .forEach((badge) => badge.remove());
+    document.querySelectorAll('.user-links [data-notification-count],.user-links [data-unread-count],.feature-links [data-notification-count],.feature-links [data-unread-count]')
+      .forEach((node) => {
+        if (node.hasAttribute('data-notification-count') && node.dataset.notificationCount !== '0') {
+          node.dataset.notificationCount = '0';
+        }
+        if (node.hasAttribute('data-unread-count') && node.dataset.unreadCount !== '0') {
+          node.dataset.unreadCount = '0';
+        }
+      });
+  }
+
+  function nativeNotificationInfo() {
+    if (isNotificationHref()) {
+      clearNotificationState();
+      if (!notificationHrefSnapshot) notificationHrefSnapshot = routeHref('notifications');
+      return { href: notificationHrefSnapshot, count: '' };
+    }
+    const nativeLink = nativeAnchors('a[href]').find((link) => {
+      const href = (link.getAttribute('href') || '').replace(/&amp;/g, '&');
+      const label = normalizeLinkLabel(link.textContent).replace(/[\d,.+]+$/, '');
+      return /[?&]tab=notifications(?:&|$)/.test(href) || ['我的通知', '通知', '我的消息'].includes(label);
+    });
+    const nativeBadge = nativeLink?.matches('.notify-badge,[data-notification-count],[data-unread-count]')
+      ? nativeLink
+      : nativeLink?.querySelector('.notify-badge,[data-notification-count],[data-unread-count]')
+        || nativeLink?.parentElement?.querySelector(':scope > .notify-badge,:scope > [data-notification-count],:scope > [data-unread-count]');
+    const rawCount = nativeBadge?.dataset.notificationCount
+      || nativeBadge?.dataset.unreadCount
+      || nativeBadge?.textContent
+      || nativeBadge?.getAttribute('aria-label')
+      || '';
+    const count = String(rawCount).trim().match(/\d+\+?/)?.[0] || '';
+    const nativeHref = nativeLink?.getAttribute('href') || '';
+    if (nativeHref) notificationHrefSnapshot = nativeHref;
+    if (!notificationHrefSnapshot) notificationHrefSnapshot = routeHref('notifications');
+
+    // The URL may be retained after the native header is replaced, but unread
+    // state must always come from the current DOM. No badge means zero unread.
+    return { href: notificationHrefSnapshot, count };
+  }
+
+  const escapeAttr = (value) => String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
 
   const getValue = (key, fallback) => {
     try {
@@ -74,6 +215,10 @@
   const getSvg = (name) => SVGS[name] || '';
 
   const css = `
+    html.${NS}.${NS}--booting body {
+      visibility: hidden !important;
+    }
+
     :root {
       --lsbm-accent: #00b96b;
       --lsbm-accent-hover: #00a85f;
@@ -365,39 +510,62 @@
       display: grid;
       gap: 2px;
     }
+    html.${NS} .${NS}__user-dropdown a.${NS}__ud-item,
+    html.${NS} .${NS}__user-dropdown button.${NS}__ud-item,
     .${NS}__ud-item {
-      width: 100%;
-      padding: 7px 10px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      border: 0;
-      border-radius: 8px;
-      background: transparent;
-      color: var(--lsbm-secondary);
-      font-size: 13px;
-      font-weight: 500;
-      text-align: left;
-      text-decoration: none;
-      cursor: pointer;
-      transition: all 0.15s;
-      box-sizing: border-box;
+      width: 100% !important;
+      min-height: 34px !important;
+      padding: 7px 10px !important;
+      margin: 0 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      gap: 10px !important;
+      border: 0 !important;
+      outline: 0 !important;
+      border-radius: 8px !important;
+      background: transparent !important;
+      color: var(--lsbm-secondary) !important;
+      font-family: inherit !important;
+      font-size: 13px !important;
+      font-weight: 500 !important;
+      line-height: 1.4 !important;
+      text-align: left !important;
+      text-decoration: none !important;
+      text-indent: 0 !important;
+      cursor: pointer !important;
+      transition: all 0.15s ease !important;
+      box-sizing: border-box !important;
+      box-shadow: none !important;
+      appearance: none !important;
+      -webkit-appearance: none !important;
     }
     .${NS}__ud-item svg {
+      width: 16px !important;
+      height: 16px !important;
+      min-width: 16px !important;
+      flex: 0 0 16px !important;
+      margin: 0 !important;
+      padding: 0 !important;
       opacity: 0.75;
-      flex-shrink: 0;
+    }
+    .${NS}__ud-item span {
+      margin: 0 !important;
+      padding: 0 !important;
+      text-align: left !important;
+      line-height: 1.4 !important;
     }
     .${NS}__ud-item:hover {
-      background: var(--lsbm-accent-soft);
-      color: var(--lsbm-accent);
+      background: var(--lsbm-accent-soft) !important;
+      color: var(--lsbm-accent) !important;
     }
     .${NS}__ud-item:hover svg {
       opacity: 1;
       stroke: var(--lsbm-accent);
     }
     .${NS}__ud-item--danger:hover {
-      background: #fff1f0;
-      color: #ff4d4f;
+      background: #fff1f0 !important;
+      color: #ff4d4f !important;
     }
     .${NS}__ud-item--danger:hover svg {
       stroke: #ff4d4f;
@@ -426,19 +594,69 @@
       display: none !important;
     }
 
-    /* Main Layout Grid */
+    /* Reset all outer wrapper containers so there is NO outer frame / card box */
+    html.${NS} main.wrap,
+    html.${NS} .wrap,
+    html.${NS} .home-shell,
+    html.${NS} .topic-shell,
+    html.${NS} .detail-shell,
+    html.${NS} .forum-shell,
+    html.${NS} .main-shell,
+    html.${NS} .shell,
+    html.${NS} .forum-layout,
+    html.${NS} .forum-layout.${NS}__layout,
+    html.${NS} .forum-main,
+    html.${NS} .main-panel,
+    html.${NS} .content-wrap,
+    html.${NS} .layout-wrap,
+    html.${NS} .site-content,
+    html.${NS} .main-content,
+    html.${NS} .site-box,
+    html.${NS} .forum-container,
+    html.${NS} .layout-container,
+    html.${NS} #main,
+    html.${NS} .container {
+      border: 0 !important;
+      outline: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      border-radius: 0 !important;
+    }
     html.${NS} main.wrap {
       box-sizing: border-box;
       width: 100%;
       max-width: var(--lsbm-page) !important;
       margin: 0 auto !important;
       padding: 16px 20px 48px !important;
+      border: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+    }
+    html.${NS} .home-shell,
+    html.${NS} .topic-shell,
+    html.${NS} .detail-shell,
+    html.${NS} .forum-shell,
+    html.${NS} .main-shell,
+    html.${NS} .shell,
+    html.${NS} .content-wrap,
+    html.${NS} .layout-wrap {
+      padding: 0 !important;
+      margin: 0 !important;
+      width: 100% !important;
+      border: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
     }
     html.${NS} .forum-layout.${NS}__layout {
       display: grid !important;
       grid-template-columns: 218px minmax(580px, 1fr) 340px !important;
       gap: 16px !important;
       align-items: start;
+      border: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+      margin: 0 !important;
     }
     html.${NS} .forum-layout.${NS}__layout > .forum-main {
       grid-column: 2;
@@ -541,6 +759,108 @@
       height: 1px;
       margin: 8px 10px;
       background: var(--lsbm-line);
+    }
+
+    /* Native forum list, relocated into the unused left-column space */
+    .${NS}__left-forums {
+      min-height: 0;
+      max-height: 420px;
+      margin: 12px 2px 10px;
+      padding: 12px 8px 8px;
+      overflow-y: auto;
+      border: 1px solid var(--lsbm-line);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--lsbm-panel) 96%, var(--lsbm-bg));
+      scrollbar-width: thin;
+    }
+    .${NS}__left-forums-title {
+      margin: 0 4px 7px;
+      color: var(--lsbm-text);
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+    html.${NS} .sidebar .${NS}__forum-source {
+      display: none !important;
+    }
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list {
+      display: grid !important;
+      grid-template-columns: 1fr !important;
+      gap: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      list-style: none !important;
+    }
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li,
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li:nth-child(n+7) {
+      position: relative !important;
+      display: block !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      list-style: none !important;
+      border-bottom: 1px solid color-mix(in srgb, var(--lsbm-line) 72%, transparent) !important;
+    }
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li:last-child {
+      border-bottom: 0 !important;
+    }
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li::before {
+      content: "";
+      position: absolute;
+      z-index: 1;
+      top: 50%;
+      left: 4px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #1677ff;
+      transform: translateY(-50%);
+      pointer-events: none;
+    }
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li:nth-child(2n)::before { background: #536b95; }
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li:nth-child(4n)::before { background: #f52269; }
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li:nth-child(5n)::before { background: #389e0d; }
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li:nth-child(7n)::before { background: #9a6548; }
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list a {
+      width: 100% !important;
+      min-height: 31px !important;
+      margin: 0 !important;
+      padding: 0 4px 0 17px !important;
+      display: flex !important;
+      flex-direction: row !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      gap: 7px !important;
+      border-radius: 6px !important;
+      background: transparent !important;
+      box-sizing: border-box !important;
+      text-align: left !important;
+    }
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list a:hover {
+      background: var(--lsbm-accent-soft) !important;
+    }
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-name,
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list a .forum-name,
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list a span:first-of-type {
+      min-width: 0 !important;
+      flex: 1 1 auto !important;
+      margin: 0 !important;
+      color: var(--lsbm-secondary) !important;
+      font-size: 12px !important;
+      font-weight: 500 !important;
+      line-height: 1.25 !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
+    }
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-count,
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list a .forum-count,
+    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list a span:last-of-type {
+      flex: 0 0 auto !important;
+      margin: 0 0 0 auto !important;
+      color: var(--lsbm-muted) !important;
+      font-size: 11px !important;
+      font-weight: 400 !important;
+      line-height: 1 !important;
     }
 
     /* Left Sidebar VIP Card */
@@ -676,18 +996,84 @@
       font-weight: 600;
     }
     .${NS}__toolbar-filter {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 6px 10px;
-      color: var(--lsbm-muted);
-      font-size: 12px;
-      cursor: pointer;
-      border-radius: 6px;
+      position: relative;
+      flex: 0 0 auto;
     }
-    .${NS}__toolbar-filter:hover {
-      color: var(--lsbm-text);
-      background: var(--lsbm-bg);
+    html.${NS} .topic-toolbar .${NS}__toolbar-filter-trigger {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 5px !important;
+      min-height: 30px !important;
+      padding: 5px 9px !important;
+      border: 1px solid transparent !important;
+      border-radius: 6px !important;
+      background: transparent !important;
+      color: var(--lsbm-muted) !important;
+      font-size: 12px !important;
+      cursor: pointer !important;
+    }
+    html.${NS} .topic-toolbar .${NS}__toolbar-filter-trigger:hover,
+    html.${NS} .topic-toolbar .${NS}__toolbar-filter.is-open .${NS}__toolbar-filter-trigger {
+      border-color: var(--lsbm-line) !important;
+      background: var(--lsbm-bg) !important;
+      color: var(--lsbm-text) !important;
+    }
+    .${NS}__toolbar-filter-trigger svg {
+      transition: transform 0.15s ease;
+    }
+    .${NS}__toolbar-filter.is-open .${NS}__toolbar-filter-trigger svg {
+      transform: rotate(180deg);
+    }
+    .${NS}__toolbar-filter-menu {
+      position: absolute;
+      top: calc(100% + 7px);
+      right: 0;
+      z-index: 1300;
+      width: 142px;
+      padding: 6px;
+      display: none;
+      gap: 2px;
+      border: 1px solid var(--lsbm-line);
+      border-radius: 9px;
+      background: var(--lsbm-panel);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12);
+    }
+    .${NS}__toolbar-filter.is-open .${NS}__toolbar-filter-menu {
+      display: grid;
+    }
+    html.${NS} .topic-toolbar .${NS}__toolbar-filter-option {
+      display: flex !important;
+      align-items: center !important;
+      min-height: 32px !important;
+      padding: 0 9px !important;
+      border: 0 !important;
+      border-radius: 6px !important;
+      background: transparent !important;
+      color: var(--lsbm-secondary) !important;
+      font-size: 12px !important;
+      text-decoration: none !important;
+    }
+    html.${NS} .topic-toolbar .${NS}__toolbar-filter-option:hover,
+    html.${NS} .topic-toolbar .${NS}__toolbar-filter-option.is-active {
+      background: var(--lsbm-accent-soft) !important;
+      color: var(--lsbm-accent) !important;
+    }
+    html.${NS} .topic-toolbar .block-settings,
+    html.${NS} .topic-toolbar .shield-btn,
+    html.${NS} .topic-toolbar a[href*="block"],
+    html.${NS} .topic-toolbar a[href*="shield"],
+    html.${NS} .topic-toolbar button:not(.tab):not(.${NS}__toolbar-filter-trigger) {
+      padding: 4px 8px !important;
+      border-radius: 6px !important;
+      border: 1px solid var(--lsbm-line) !important;
+      background: var(--lsbm-bg) !important;
+      color: var(--lsbm-secondary) !important;
+      font-size: 12px !important;
+      text-decoration: none !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 4px !important;
+      margin-left: 8px !important;
     }
 
     /* Post / Topic List */
@@ -761,55 +1147,87 @@
       color: var(--lsbm-accent) !important;
     }
 
-    /* Badges */
-    html.${NS} .topic-badge {
-      display: inline-flex;
-      align-items: center;
-      padding: 1px 6px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 600;
-      flex-shrink: 0;
-    }
-    html.${NS} .topic-badge.pinned {
-      background: var(--lsbm-accent-soft) !important;
-      color: var(--lsbm-accent) !important;
-    }
-    .${NS}__tag-hot {
-      display: inline-flex;
-      align-items: center;
-      padding: 1px 5px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 500;
-      background: #fff2e8;
-      color: #fa541c;
-      border: 1px solid #ffbb96;
-      flex-shrink: 0;
-    }
-    .${NS}__tag-unread {
-      display: inline-flex;
-      align-items: center;
-      padding: 1px 5px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 500;
-      background: #e8f7f0;
-      color: #00b96b;
-      border: 1px solid #b7eb8f;
-      flex-shrink: 0;
-    }
+    /* Badges & Stamps Unified Styling */
+    html.${NS} .topic-badge,
+    html.${NS} .topic-stamp-badge,
+    html.${NS} .topic-stamp,
+    html.${NS} [class*="topic-stamp"],
+    html.${NS} [class*="stamp-"],
+    .${NS}__tag-hot,
+    .${NS}__tag-unread,
     .${NS}__tag-lottery {
-      display: inline-flex;
-      align-items: center;
-      padding: 1px 5px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 500;
-      background: #fff7e6;
-      color: #fa8c16;
-      border: 1px solid #ffd591;
-      flex-shrink: 0;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      height: 20px !important;
+      min-height: 20px !important;
+      line-height: 1 !important;
+      padding: 0 6px !important;
+      margin: 0 2px !important;
+      border-radius: 4px !important;
+      font-size: 11px !important;
+      font-weight: 600 !important;
+      writing-mode: horizontal-tb !important;
+      text-orientation: mixed !important;
+      white-space: nowrap !important;
+      flex-shrink: 0 !important;
+      letter-spacing: 0 !important;
+      box-sizing: border-box !important;
+      vertical-align: middle !important;
+      border: 1px solid transparent !important;
+    }
+
+    /* Pinned / 置顶 */
+    html.${NS} .topic-badge.pinned,
+    html.${NS} .topic-stamp-pinned,
+    html.${NS} .stamp-pinned {
+      background: #e8f7f0 !important;
+      color: #00b96b !important;
+      border-color: #b7eb8f !important;
+    }
+
+    /* Digest / 精华 */
+    html.${NS} .topic-stamp-digest,
+    html.${NS} .stamp-digest {
+      background: #fff7e6 !important;
+      color: #fa8c16 !important;
+      border-color: #ffd591 !important;
+    }
+
+    /* Hot / 热 */
+    html.${NS} .topic-stamp-hot,
+    html.${NS} .stamp-hot,
+    .${NS}__tag-hot {
+      background: #fff2e8 !important;
+      color: #fa541c !important;
+      border-color: #ffbb96 !important;
+    }
+
+    /* Unread / 未读 */
+    html.${NS} .topic-stamp-unread,
+    html.${NS} .stamp-unread,
+    .${NS}__tag-unread {
+      background: #e8f7f0 !important;
+      color: #00b96b !important;
+      border-color: #b7eb8f !important;
+    }
+
+    /* Lottery / 抽奖中 */
+    html.${NS} .topic-stamp-lottery,
+    html.${NS} .stamp-lottery,
+    .${NS}__tag-lottery {
+      background: #fff7e6 !important;
+      color: #fa8c16 !important;
+      border-color: #ffd591 !important;
+    }
+
+    /* Image Count (e.g. 🖼️ 2) */
+    html.${NS} .topic-stamp-img,
+    html.${NS} [class*="stamp-img"],
+    html.${NS} [class*="stamp-image"] {
+      background: #f1f5f9 !important;
+      color: #475569 !important;
+      border-color: #e2e8f0 !important;
     }
 
     /* Meta Info */
@@ -923,52 +1341,95 @@
       padding: 18px !important;
     }
     html.${NS} .user-header {
-      display: flex;
-      align-items: center;
-      gap: 14px;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      gap: 12px !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 100% !important;
+      text-align: left !important;
     }
     html.${NS} .user-avatar-big,
     html.${NS} .user-header .avatar-img,
     html.${NS} .user-header img {
       width: 52px !important;
       height: 52px !important;
+      min-width: 52px !important;
+      max-width: 52px !important;
+      flex: 0 0 52px !important;
+      margin: 0 !important;
+      padding: 0 !important;
       border-radius: 50% !important;
-      object-fit: cover;
+      object-fit: cover !important;
+    }
+    html.${NS} .user-header .user-info-wrap,
+    html.${NS} .user-header > div:not(.avatar-wrap) {
+      flex: 1 1 auto !important;
+      min-width: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      text-align: left !important;
+      display: flex !important;
+      flex-direction: column !important;
+      justify-content: center !important;
+      align-items: flex-start !important;
     }
     .${NS}__user-info-top {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      gap: 6px !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 100% !important;
+      flex-wrap: nowrap !important;
     }
     html.${NS} .user-name {
-      font-size: 16px !important;
+      font-size: 15px !important;
       font-weight: 750 !important;
       color: var(--lsbm-text) !important;
+      line-height: 1.2 !important;
+      margin: 0 !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
     }
     .${NS}__user-tag {
-      padding: 1px 6px;
-      border-radius: 4px;
-      background: #f0f2f5;
-      color: #4e5969;
-      font-size: 11px;
-      font-weight: 500;
+      padding: 1px 6px !important;
+      border-radius: 4px !important;
+      background: #f0f2f5 !important;
+      color: #4e5969 !important;
+      font-size: 11px !important;
+      font-weight: 500 !important;
+      white-space: nowrap !important;
+      flex-shrink: 0 !important;
+      margin: 0 !important;
     }
     .${NS}__user-level-badge {
-      width: 14px;
-      height: 14px;
-      border-radius: 3px;
-      background: #252a31;
-      color: #fff;
-      font-size: 9px;
-      font-weight: 800;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
+      width: 14px !important;
+      height: 14px !important;
+      min-width: 14px !important;
+      border-radius: 3px !important;
+      background: #252a31 !important;
+      color: #fff !important;
+      font-size: 9px !important;
+      font-weight: 800 !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      flex-shrink: 0 !important;
+      margin: 0 !important;
+      line-height: 1 !important;
     }
     html.${NS} .user-rank {
-      font-size: 12px !important;
+      font-size: 11.5px !important;
       color: var(--lsbm-muted) !important;
-      margin-top: 4px;
+      margin: 4px 0 0 0 !important;
+      padding: 0 !important;
+      text-align: left !important;
+      white-space: nowrap !important;
+      line-height: 1.2 !important;
     }
     .${NS}__profile-stats {
       display: grid;
@@ -978,6 +1439,8 @@
     }
     .${NS}__profile-stat {
       min-width: 0;
+      color: inherit;
+      text-decoration: none;
     }
     .${NS}__profile-stat strong {
       display: block;
@@ -1010,17 +1473,26 @@
       background: var(--lsbm-accent-hover) !important;
     }
     /* Hide all extra native actions, menus, duplicate post buttons on live site */
-    html.${NS} .user-card .user-wrap > :not(.user-header):not(.${NS}__profile-stats):not(.${NS}__user-cta),
-    html.${NS} .user-card .user-actions,
-    html.${NS} .user-card .user-menu,
-    html.${NS} .user-card .user-nav,
-    html.${NS} .user-card .side-auth,
-    html.${NS} .user-card .side-publish,
-    html.${NS} .user-card .side-publish-btn,
-    html.${NS} .user-card > a.create-topic,
-    html.${NS} .user-card a[href*="topic_create"],
-    html.${NS} .user-card a[href*="topic/create"],
-    html.${NS} .user-card a[href*="topic/add"],
+    html.${NS} .sidebar .user-card > :not(.user-wrap):not(.user-header):not(.${NS}__profile-stats):not(.${NS}__user-cta),
+    html.${NS} .sidebar .user-card .user-wrap > :not(.user-header):not(.${NS}__profile-stats):not(.${NS}__user-cta),
+    html.${NS} .sidebar .user-card .user-actions,
+    html.${NS} .sidebar .user-card .user-menu,
+    html.${NS} .sidebar .user-card .user-nav,
+    html.${NS} .sidebar .user-card .side-auth,
+    html.${NS} .sidebar .user-card .side-publish,
+    html.${NS} .sidebar .user-card .side-publish-btn,
+    html.${NS} .sidebar .user-card .side-btn,
+    html.${NS} .sidebar .user-card .side-post,
+    html.${NS} .sidebar .user-card .btn:not(.${NS}__profile-stat),
+    html.${NS} .sidebar .user-card button:not(.${NS}__user-cta),
+    html.${NS} .sidebar .user-card a.create-topic,
+    html.${NS} .sidebar .user-card a[href*="topic_edit"],
+    html.${NS} .sidebar .user-card a[href*="topic/edit"],
+    html.${NS} .sidebar .user-card a[href*="topic_create"],
+    html.${NS} .sidebar .user-card a[href*="topic/create"],
+    html.${NS} .sidebar .user-card a[href*="topic_add"],
+    html.${NS} .sidebar .user-card a[href*="topic/add"],
+    html.${NS} .sidebar .user-card a.btn-publish,
     html.${NS} .stats-card {
       display: none !important;
     }
@@ -1060,6 +1532,24 @@
     html.${NS} .daily-hot-topics-card {
       order: -9;
     }
+    html.${NS} .daily-hot-topics-card .quick-wrap {
+      padding: 12px 14px !important;
+    }
+    html.${NS} .daily-hot-topics-card .${NS}__card-heading {
+      margin-bottom: 7px !important;
+    }
+    html.${NS} .daily-hot-topics-card .${NS}__card-title-group {
+      font-size: 13px !important;
+    }
+    html.${NS} .daily-hot-topics-card .${NS}__card-title-group svg {
+      width: 14px !important;
+      height: 14px !important;
+    }
+    html.${NS} .daily-hot-topics-card .${NS}__card-action {
+      min-height: 24px !important;
+      padding: 0 !important;
+      font-size: 11px !important;
+    }
     html.${NS} .daily-hot-topics-head,
     html.${NS} .daily-hot-topics-card .quick-title,
     html.${NS} .daily-hot-topics-card .card-head {
@@ -1068,7 +1558,7 @@
     html.${NS} .daily-hot-topics-list {
       display: flex !important;
       flex-direction: column !important;
-      gap: 6px !important;
+      gap: 0 !important;
       padding: 0 !important;
       margin: 0 !important;
       list-style: none !important;
@@ -1076,7 +1566,11 @@
     html.${NS} .daily-hot-topics-list > li {
       margin: 0 !important;
       padding: 0 !important;
+      border-bottom: 1px solid var(--lsbm-line) !important;
       list-style: none !important;
+    }
+    html.${NS} .daily-hot-topics-list > li:nth-child(5) {
+      border-bottom: 0 !important;
     }
     html.${NS} .daily-hot-topics-list > li:nth-child(n+6) {
       display: none !important;
@@ -1086,8 +1580,9 @@
       display: flex !important;
       align-items: center !important;
       justify-content: flex-start !important;
-      gap: 8px !important;
-      padding: 4px 0 !important;
+      gap: 7px !important;
+      min-height: 35px !important;
+      padding: 3px 0 !important;
       text-decoration: none !important;
       color: var(--lsbm-text) !important;
       font-size: 13px !important;
@@ -1095,17 +1590,17 @@
       box-sizing: border-box !important;
     }
     html.${NS} .daily-hot-topics-list .${NS}__hot-rank {
-      width: 18px !important;
-      height: 18px !important;
-      min-width: 18px !important;
-      flex: 0 0 18px !important;
+      width: 17px !important;
+      height: 17px !important;
+      min-width: 17px !important;
+      flex: 0 0 17px !important;
       display: inline-flex !important;
       align-items: center !important;
       justify-content: center !important;
       border-radius: 4px !important;
       background: #8c9ba5 !important;
       color: #ffffff !important;
-      font-size: 11px !important;
+      font-size: 10px !important;
       font-weight: 700 !important;
       line-height: 1 !important;
     }
@@ -1118,25 +1613,31 @@
     html.${NS} .daily-hot-topics-list > li:nth-child(3) .${NS}__hot-rank {
       background: #faad14 !important;
     }
-    html.${NS} .daily-hot-topics-list .daily-hot-topics-title,
-    html.${NS} .daily-hot-topics-list a span:not(.${NS}__hot-rank):not(.daily-hot-topics-count) {
+    html.${NS} .daily-hot-topics-list .daily-hot-topics-content {
       flex: 1 1 auto !important;
+      display: grid !important;
+      gap: 0 !important;
+      min-width: 0 !important;
+      line-height: 1.25 !important;
+    }
+    html.${NS} .daily-hot-topics-list .daily-hot-topics-title {
+      display: block !important;
       min-width: 0 !important;
       overflow: hidden !important;
       text-overflow: ellipsis !important;
       white-space: nowrap !important;
       color: var(--lsbm-text) !important;
-      font-size: 13px !important;
+      font-size: 12.5px !important;
     }
-    html.${NS} .daily-hot-topics-list a:hover .daily-hot-topics-title,
-    html.${NS} .daily-hot-topics-list a:hover span:not(.${NS}__hot-rank):not(.daily-hot-topics-count) {
+    html.${NS} .daily-hot-topics-list a:hover .daily-hot-topics-title {
       color: var(--lsbm-accent) !important;
     }
     html.${NS} .daily-hot-topics-list .daily-hot-topics-count {
-      flex: 0 0 auto !important;
-      margin-left: auto !important;
+      display: block !important;
+      margin: 1px 0 0 !important;
       color: var(--lsbm-muted) !important;
-      font-size: 11.5px !important;
+      font-size: 10.5px !important;
+      line-height: 1.2 !important;
       white-space: nowrap !important;
     }
 
@@ -1146,38 +1647,69 @@
     }
     html.${NS} .forum-enhancements-sidebar-list {
       display: grid !important;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(3, 1fr) !important;
       gap: 8px !important;
       padding: 0 !important;
       margin: 0 !important;
-      list-style: none;
+      list-style: none !important;
+    }
+    html.${NS} .forum-enhancements-sidebar-list > li {
+      margin: 0 !important;
+      padding: 0 !important;
+      list-style: none !important;
+    }
+    html.${NS} .forum-enhancements-sidebar-list > li:nth-child(n+7) {
+      display: none !important;
     }
     html.${NS} .forum-enhancements-sidebar-list a {
-      min-height: 48px;
-      padding: 8px 4px !important;
+      min-height: 52px !important;
+      padding: 10px 4px !important;
       display: flex !important;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      border-radius: 8px;
-      background: var(--lsbm-bg);
-      text-align: center;
-      text-decoration: none;
-      transition: background 0.15s;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: center !important;
+      border-radius: 8px !important;
+      background: var(--lsbm-bg) !important;
+      text-align: center !important;
+      text-decoration: none !important;
+      transition: background 0.15s ease !important;
+      box-sizing: border-box !important;
     }
     html.${NS} .forum-enhancements-sidebar-list a:hover {
-      background: var(--lsbm-accent-soft);
+      background: var(--lsbm-accent-soft) !important;
     }
-    html.${NS} .forum-enhancements-sidebar-name {
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--lsbm-secondary);
-      line-height: 1.2;
+    /* Hide native colored dots and badges in forum stats */
+    html.${NS} .forum-enhancements-sidebar-list a::before,
+    html.${NS} .forum-enhancements-sidebar-list a::after,
+    html.${NS} .forum-enhancements-sidebar-list a .badge-category-bg,
+    html.${NS} .forum-enhancements-sidebar-list a .category-color,
+    html.${NS} .forum-enhancements-sidebar-list a .forum-color,
+    html.${NS} .forum-enhancements-sidebar-list a .forum-dot,
+    html.${NS} .forum-enhancements-sidebar-list a i,
+    html.${NS} .forum-enhancements-sidebar-list a .dot,
+    html.${NS} .forum-enhancements-sidebar-list a span[style*="background"],
+    html.${NS} .forum-enhancements-sidebar-list a span[style*="border-radius: 50%"],
+    html.${NS} .forum-enhancements-sidebar-list a span[style*="border-radius:50%"] {
+      display: none !important;
     }
-    html.${NS} .forum-enhancements-sidebar-count {
-      color: var(--lsbm-muted);
-      font-size: 11px;
-      margin-top: 2px;
+    html.${NS} .forum-enhancements-sidebar-name,
+    html.${NS} .forum-enhancements-sidebar-list a .forum-name,
+    html.${NS} .forum-enhancements-sidebar-list a span:first-of-type {
+      font-size: 12.5px !important;
+      font-weight: 600 !important;
+      color: var(--lsbm-text) !important;
+      line-height: 1.3 !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+    }
+    html.${NS} .forum-enhancements-sidebar-count,
+    html.${NS} .forum-enhancements-sidebar-list a .forum-count,
+    html.${NS} .forum-enhancements-sidebar-list a span:last-of-type {
+      color: var(--lsbm-muted) !important;
+      font-size: 11.5px !important;
+      margin-top: 4px !important;
+      line-height: 1 !important;
     }
 
     /* Active Users Card */
@@ -1291,6 +1823,22 @@
       bottom: 18px;
       z-index: 1200;
     }
+    .${NS}__settings.is-open {
+      display: block;
+    }
+    .${NS}__settings.is-desktop-anchor {
+      right: auto;
+      bottom: auto;
+    }
+    .${NS}__settings.is-desktop-anchor .${NS}__settings-toggle {
+      display: none;
+    }
+    .${NS}__settings.is-desktop-anchor .${NS}__settings-menu {
+      top: 0;
+      right: auto;
+      bottom: auto;
+      left: 0;
+    }
     .${NS}__settings-toggle {
       width: 44px;
       height: 44px;
@@ -1333,6 +1881,387 @@
       background: var(--lsbm-accent-soft);
     }
 
+    /* ===================================================
+       Topic Detail & Nested Comments Tree (楼中楼回复区)
+       =================================================== */
+    html.${NS} .topic-post,
+    html.${NS} .topic-detail,
+    html.${NS} .post-stream,
+    html.${NS} .comments-wrap,
+    html.${NS} .comment-tree {
+      max-width: 100%;
+    }
+
+    /* Main Parent Comment Row */
+    html.${NS} .topic-post,
+    html.${NS} .comment-item,
+    html.${NS} .reply-item,
+    html.${NS} .post-stream > .post-item {
+      padding: 16px 20px !important;
+      border-bottom: 1px solid var(--lsbm-line) !important;
+      background: var(--lsbm-panel) !important;
+      transition: background 0.15s ease;
+    }
+    html.${NS} .topic-post:hover,
+    html.${NS} .comment-item:hover,
+    html.${NS} .reply-item:hover {
+      background: rgba(0, 0, 0, 0.01) !important;
+    }
+    html.${NS}[data-themes-color-mode="dark"] .topic-post:hover,
+    html.${NS}[data-themes-color-mode="dark"] .comment-item:hover {
+      background: rgba(255, 255, 255, 0.02) !important;
+    }
+
+    /* Nested Child Comments (楼中楼 / 嵌套子回复) */
+    html.${NS} .comment-children,
+    html.${NS} .comment-nested,
+    html.${NS} .reply-children,
+    html.${NS} .sub-comments,
+    html.${NS} .tree-children {
+      margin-top: 12px !important;
+      margin-left: 28px !important;
+      padding-left: 16px !important;
+      border-left: 2px solid var(--lsbm-line) !important;
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 10px !important;
+    }
+
+    /* Nested Child Item Sub-Card */
+    html.${NS} .comment-child,
+    html.${NS} .comment-children .comment-item,
+    html.${NS} .reply-children .reply-item,
+    html.${NS} .sub-comment-item {
+      padding: 10px 14px !important;
+      border-radius: 10px !important;
+      background: var(--lsbm-bg) !important;
+      border: 1px solid var(--lsbm-line) !important;
+      transition: all 0.15s ease;
+    }
+    html.${NS} .comment-child:hover,
+    html.${NS} .comment-children .comment-item:hover,
+    html.${NS} .sub-comment-item:hover {
+      border-color: rgba(0, 185, 107, 0.3) !important;
+      background: var(--lsbm-panel) !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+
+    /* bbs1.org quote_threads: replies are reordered sibling <li>s, not nested containers. */
+    html.${NS} .topic-post-list > .post-entry {
+      min-height: 0 !important;
+      padding: 14px 18px !important;
+      grid-template-columns: 38px minmax(0, 1fr) !important;
+      grid-template-areas: "avatar body" "content content" !important;
+      gap: 0 12px !important;
+      align-items: start !important;
+    }
+    html.${NS} .topic-post-list > .post-entry .post-avatar,
+    html.${NS} .topic-post-list > .post-entry .post-avatar .avatar-img,
+    html.${NS} .topic-post-list > .post-entry .post-avatar img {
+      width: 38px !important;
+      height: 38px !important;
+      border-radius: 9px !important;
+    }
+    html.${NS} .topic-post-list > .post-entry .post-head {
+      display: flex !important;
+      align-items: center !important;
+      min-height: 20px !important;
+      gap: 5px !important;
+      padding-right: 92px !important;
+      flex-wrap: wrap !important;
+    }
+    html.${NS} .topic-post-list > .post-entry .post-meta {
+      display: flex !important;
+      align-items: center !important;
+      gap: 5px !important;
+      margin-top: 3px !important;
+      color: var(--lsbm-muted) !important;
+      font-size: 11.5px !important;
+    }
+    html.${NS} .topic-post-list > .post-entry .post-content {
+      grid-area: content !important;
+      margin-top: 8px !important;
+      padding-top: 0 !important;
+      border: 0 !important;
+      color: var(--lsbm-text) !important;
+      font-size: 14px !important;
+      line-height: 1.65 !important;
+      overflow-wrap: anywhere;
+    }
+    html.${NS} .topic-post-list > .post-entry .post-content > :first-child {
+      margin-top: 0 !important;
+    }
+    html.${NS} .topic-post-list > .post-entry .post-content > :last-child {
+      margin-bottom: 0 !important;
+    }
+
+    html.${NS} .topic-post-list > .quote-threads-child {
+      position: relative !important;
+      min-height: 0 !important;
+      margin: 0 14px 0 34px !important;
+      padding: 10px 12px 11px 14px !important;
+      grid-template-columns: 28px minmax(0, 1fr) !important;
+      grid-template-areas: "avatar body" "content content" !important;
+      gap: 0 9px !important;
+      border: 0 !important;
+      border-left: 2px solid var(--lsbm-line) !important;
+      border-bottom: 0 !important;
+      border-radius: 0 !important;
+      background: color-mix(in srgb, var(--lsbm-bg) 72%, var(--lsbm-panel)) !important;
+      box-shadow: none !important;
+    }
+    html.${NS} .topic-post-list > .quote-threads-child::before {
+      position: absolute !important;
+      top: 23px !important;
+      left: -2px !important;
+      width: 11px !important;
+      border-top: 2px solid var(--lsbm-line) !important;
+      content: "" !important;
+    }
+    html.${NS} .topic-post-list > .quote-threads-child:hover {
+      border-left-color: color-mix(in srgb, var(--lsbm-accent) 42%, var(--lsbm-line)) !important;
+      background: var(--lsbm-accent-soft) !important;
+    }
+    html.${NS} .topic-post-list > .quote-threads-child.quote-threads-thread-end {
+      margin-bottom: 8px !important;
+      border-bottom: 1px solid var(--lsbm-line) !important;
+      border-radius: 0 0 9px 9px !important;
+    }
+    html.${NS} .topic-post-list > .quote-threads-child .post-avatar,
+    html.${NS} .topic-post-list > .quote-threads-child .post-avatar .avatar-img,
+    html.${NS} .topic-post-list > .quote-threads-child .post-avatar img {
+      width: 28px !important;
+      height: 28px !important;
+      border-radius: 7px !important;
+    }
+    html.${NS} .topic-post-list > .quote-threads-child .post-head {
+      min-height: 18px !important;
+      padding-right: 82px !important;
+    }
+    html.${NS} .topic-post-list > .quote-threads-child .post-title,
+    html.${NS} .topic-post-list > .quote-threads-child .post-author {
+      font-size: 13.5px !important;
+    }
+    html.${NS} .topic-post-list > .quote-threads-child .post-content {
+      margin-top: 7px !important;
+      font-size: 13.5px !important;
+      line-height: 1.6 !important;
+    }
+    html.${NS} .topic-post-list .quote-threads-reference {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 3px !important;
+      padding: 1px 5px !important;
+      border-radius: 4px !important;
+      background: var(--lsbm-accent-soft) !important;
+      color: var(--lsbm-accent) !important;
+      font-size: 11px !important;
+      font-weight: 600 !important;
+      line-height: 1.35 !important;
+      white-space: nowrap !important;
+    }
+    html.${NS} .topic-post-list .quote-threads-reference::before {
+      content: "↳" !important;
+    }
+    html.${NS} .topic-post-list > .quote-threads-toggle-row {
+      margin: 0 14px 8px 34px !important;
+      padding: 6px 0 8px 14px !important;
+      border-left: 2px solid var(--lsbm-line) !important;
+      background: transparent !important;
+    }
+    html.${NS} .topic-post-list .quote-threads-toggle {
+      min-height: 28px !important;
+      padding: 4px 10px !important;
+      border: 1px solid var(--lsbm-line) !important;
+      border-radius: 7px !important;
+      background: var(--lsbm-panel) !important;
+      color: var(--lsbm-muted) !important;
+      font-size: 11.5px !important;
+      cursor: pointer !important;
+    }
+    html.${NS} .topic-post-list .quote-threads-toggle:hover {
+      border-color: var(--lsbm-accent) !important;
+      background: var(--lsbm-accent-soft) !important;
+      color: var(--lsbm-accent) !important;
+    }
+    html.${NS} .topic-post-list > .quote-threads-is-collapsed {
+      display: none !important;
+    }
+
+    /* Comment Header & User Meta */
+    html.${NS} .comment-header,
+    html.${NS} .reply-header,
+    html.${NS} .topic-meta-data {
+      display: flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      margin-bottom: 6px !important;
+      flex-wrap: wrap !important;
+    }
+    html.${NS} .comment-avatar,
+    html.${NS} .reply-avatar {
+      width: 36px !important;
+      height: 36px !important;
+      border-radius: 10px !important;
+      object-fit: cover !important;
+      flex-shrink: 0 !important;
+    }
+    html.${NS} .comment-child .comment-avatar,
+    html.${NS} .sub-comment-item .comment-avatar {
+      width: 28px !important;
+      height: 28px !important;
+      border-radius: 7px !important;
+    }
+    html.${NS} .comment-user,
+    html.${NS} .reply-user {
+      font-weight: 700 !important;
+      color: var(--lsbm-text) !important;
+      font-size: 13.5px !important;
+      text-decoration: none !important;
+    }
+    html.${NS} .comment-user:hover,
+    html.${NS} .reply-user:hover {
+      color: var(--lsbm-accent) !important;
+    }
+
+    /* User Role / UID / Title Badges in Comments */
+    html.${NS} .comment-badge,
+    html.${NS} .user-badge,
+    html.${NS} .role-badge,
+    html.${NS} .user-title {
+      display: inline-flex !important;
+      align-items: center !important;
+      padding: 1px 6px !important;
+      border-radius: 4px !important;
+      font-size: 11px !important;
+      font-weight: 500 !important;
+      line-height: 1.2 !important;
+    }
+    html.${NS} .role-badge,
+    html.${NS} .badge-creator {
+      background: #f0f2f5 !important;
+      color: #64748b !important;
+    }
+    html.${NS} .badge-dragon,
+    html.${NS} .user-title {
+      background: #fff7e6 !important;
+      color: #fa8c16 !important;
+      border: 1px solid #ffd591 !important;
+    }
+    html.${NS} .badge-cat {
+      background: #e8f7f0 !important;
+      color: #00b96b !important;
+      border: 1px solid #b7eb8f !important;
+    }
+    html.${NS} .user-uid {
+      color: var(--lsbm-muted) !important;
+      font-size: 11px !important;
+    }
+
+    /* Reply to Reply Indicator (↳ 回复 #13 4小时前) */
+    html.${NS} .reply-reference,
+    html.${NS} .reply-to-info {
+      display: flex !important;
+      align-items: center !important;
+      gap: 4px !important;
+      color: var(--lsbm-muted) !important;
+      font-size: 11.5px !important;
+      margin-top: 2px !important;
+      width: 100% !important;
+    }
+
+    /* Comment Content Body */
+    html.${NS} .comment-content,
+    html.${NS} .reply-content,
+    html.${NS} .post-body-text {
+      color: var(--lsbm-text) !important;
+      font-size: 14px !important;
+      line-height: 1.6 !important;
+      margin-top: 6px !important;
+      word-break: break-word !important;
+    }
+
+    /* Mentions (@username #13) */
+    html.${NS} .mention,
+    html.${NS} a.mention,
+    html.${NS} .reply-mention {
+      color: var(--lsbm-accent) !important;
+      font-weight: 600 !important;
+      background: var(--lsbm-accent-soft) !important;
+      padding: 1px 6px !important;
+      border-radius: 4px !important;
+      text-decoration: none !important;
+      display: inline-block !important;
+      margin-right: 4px !important;
+    }
+    html.${NS} .mention:hover {
+      text-decoration: underline !important;
+    }
+
+    /* Action Toolbar (↩ 回复, ♡ 点赞, ⚐ 举报, #13 楼层号) */
+    html.${NS} .comment-actions,
+    html.${NS} .reply-actions {
+      display: flex !important;
+      align-items: center !important;
+      gap: 12px !important;
+      color: var(--lsbm-muted) !important;
+      font-size: 12px !important;
+      margin-left: auto !important;
+    }
+    html.${NS} .comment-action-btn,
+    html.${NS} .reply-action-btn {
+      color: var(--lsbm-muted) !important;
+      cursor: pointer !important;
+      transition: color 0.15s ease !important;
+      text-decoration: none !important;
+    }
+    html.${NS} .comment-action-btn:hover,
+    html.${NS} .reply-action-btn:hover {
+      color: var(--lsbm-accent) !important;
+    }
+    html.${NS} .comment-floor,
+    html.${NS} .reply-floor {
+      font-weight: 700 !important;
+      color: var(--lsbm-muted) !important;
+      font-size: 12px !important;
+    }
+
+    @media (max-width: 700px) {
+      html.${NS} .topic-post-list > .post-entry {
+        padding: 12px 10px !important;
+        grid-template-columns: 34px minmax(0, 1fr) !important;
+        gap: 0 9px !important;
+      }
+      html.${NS} .topic-post-list > .post-entry .post-avatar,
+      html.${NS} .topic-post-list > .post-entry .post-avatar .avatar-img,
+      html.${NS} .topic-post-list > .post-entry .post-avatar img {
+        width: 34px !important;
+        height: 34px !important;
+      }
+      html.${NS} .topic-post-list > .quote-threads-child {
+        margin-right: 6px !important;
+        margin-left: 18px !important;
+        padding: 9px 8px 10px 10px !important;
+        grid-template-columns: 26px minmax(0, 1fr) !important;
+        gap: 0 7px !important;
+      }
+      html.${NS} .topic-post-list > .quote-threads-child .post-avatar,
+      html.${NS} .topic-post-list > .quote-threads-child .post-avatar .avatar-img,
+      html.${NS} .topic-post-list > .quote-threads-child .post-avatar img {
+        width: 26px !important;
+        height: 26px !important;
+      }
+      html.${NS} .topic-post-list > .post-entry .post-head,
+      html.${NS} .topic-post-list > .quote-threads-child .post-head {
+        padding-right: 0 !important;
+      }
+      html.${NS} .topic-post-list > .quote-threads-toggle-row {
+        margin-right: 6px !important;
+        margin-left: 18px !important;
+        padding-left: 10px !important;
+      }
+    }
+
     @media (max-width: 1240px) {
       html.${NS} .forum-layout.${NS}__layout {
         grid-template-columns: 76px minmax(520px, 1fr) 280px !important;
@@ -1346,6 +2275,9 @@
       }
       .${NS}__nav-label, .${NS}__vip-card, .${NS}__signature-card {
         display: none;
+      }
+      .${NS}__left-forums {
+        display: none !important;
       }
       html.${NS} .top .brand {
         min-width: 76px;
@@ -1429,12 +2361,14 @@
       const node = document.createElement('style');
       node.id = `${NS}-style`;
       node.textContent = css;
-      document.head.append(node);
+      const mount = document.head || document.documentElement;
+      if (mount) mount.append(node);
+      else document.addEventListener('readystatechange', () => (document.head || document.documentElement)?.append(node), { once: true });
     }
   }
 
   const navItem = (href, svgKey, label, active = false) =>
-    `<a href="${href}" class="${active ? 'is-active' : ''}">${getSvg(svgKey)}<span class="${NS}__nav-label">${label}</span></a>`;
+    `<a href="${escapeAttr(href)}" class="${active ? 'is-active' : ''}">${getSvg(svgKey)}<span class="${NS}__nav-label">${label}</span></a>`;
 
   function isActive(path) {
     if (path === '/') return (location.pathname === '/' && !location.search) || location.protocol === 'file:';
@@ -1442,23 +2376,32 @@
   }
 
   function buildLeft() {
+    const links = {
+      home: routeHref('home'),
+      featured: routeHref('featured'),
+      technology: routeHref('technology'),
+      resources: routeHref('resources'),
+      questions: routeHref('questions'),
+      announcements: routeHref('announcements'),
+      favorites: routeHref('favorites') || routeHref('login')
+    };
     const node = document.createElement('aside');
     node.className = `${NS}__left`;
     node.setAttribute('aria-label', '主导航');
     node.innerHTML = `
       <div class="${NS}__left-panel">
         <nav class="${NS}__nav">
-          ${navItem('/', 'home', '首页', isActive('/'))}
-          <a href="javascript:void(0)" role="button" data-lsb-new>${getSvg('plus-circle')}<span class="${NS}__nav-label">新帖</span></a>
-          ${navItem('/topic_featured', 'star', '精选', isActive('/topic_featured'))}
+          ${navItem(links.home, 'home', '首页', isActive('/'))}
+          <button type="button" data-lsb-new>${getSvg('plus-circle')}<span class="${NS}__nav-label">新帖</span></button>
+          ${navItem(links.featured, 'star', '精选', isActive('/topic_featured'))}
           <div class="${NS}__separator"></div>
-          ${navItem('/forum/4', 'code', '技术交流', isActive('/forum/4'))}
-          ${navItem('/forum/3', 'folder', '资源分享', isActive('/forum/3'))}
-          ${navItem('/forum/5', 'help', '求助问答', isActive('/forum/5'))}
-          ${navItem('/forum/9', 'megaphone', '社区公告', isActive('/forum/9'))}
+          ${navItem(links.technology, 'code', '技术交流', isActive('/forum/4'))}
+          ${navItem(links.resources, 'folder', '资源分享', isActive('/forum/3'))}
+          ${navItem(links.questions, 'help', '求助问答', isActive('/forum/5'))}
+          ${navItem(links.announcements, 'megaphone', '社区公告', isActive('/forum/9'))}
           <div class="${NS}__separator"></div>
-          ${navItem('/favorites', 'bookmark', '收藏', isActive('/favorites'))}
-          <a href="javascript:void(0)" role="button" data-lsb-settings>${getSvg('gear')}<span class="${NS}__nav-label">设置</span></a>
+          ${navItem(links.favorites, 'bookmark', '收藏', /[?&]tab=favorites/.test(location.search))}
+          <button type="button" data-lsb-settings aria-haspopup="menu" aria-expanded="false">${getSvg('gear')}<span class="${NS}__nav-label">设置</span></button>
         </nav>
         <div class="${NS}__signature-card">
           <div class="${NS}__signature-logo">${getSvg('bolt')}</div>
@@ -1473,14 +2416,18 @@
 
   function buildFooter() {
     if (document.querySelector(`.${NS}__footer`)) return;
+    const footerItems = [
+      ['友情链接', findNativeHref('友情链接')],
+      ['帮助中心', findNativeHref('帮助中心')],
+      ['APP 下载', findNativeHref(['APP 下载', 'APP下载'])],
+      ['关于我们', findNativeHref('关于我们')]
+    ].filter(([, href]) => isUsableHref(href));
+    if (!footerItems.length) return;
     const footer = document.createElement('footer');
     footer.className = `${NS}__footer`;
     footer.innerHTML = `
       <div class="${NS}__footer-links">
-        <a href="/links">友情链接</a>
-        <a href="/help">帮助中心</a>
-        <a href="/app">APP 下载</a>
-        <a href="/about">关于我们</a>
+        ${footerItems.map(([label, href]) => `<a href="${escapeAttr(href)}">${label}</a>`).join('')}
       </div>
       <div class="${NS}__footer-copy">© 2024 LINUX SB · 让技术连接每一位开发者</div>
     `;
@@ -1506,10 +2453,45 @@
     return node;
   }
 
+  function syncHeaderNotification(actions) {
+    if (!actions) return;
+    const { href, count } = nativeNotificationInfo();
+    let link = actions.querySelector('[data-lsb-notifications]');
+    if (!href) {
+      link?.remove();
+      return;
+    }
+    if (!link) {
+      link = document.createElement('a');
+      link.className = `${NS}__icon-btn`;
+      link.dataset.lsbNotifications = '';
+      link.innerHTML = getSvg('bell');
+      actions.append(link);
+    }
+    link.href = href;
+    const unread = Number.parseInt(count, 10) > 0 ? count : '';
+    link.title = unread ? `${unread} 条未读通知` : '通知与消息';
+    link.setAttribute('aria-label', link.title);
+    let badge = link.querySelector(`.${NS}__badge-dot`);
+    if (!unread) {
+      badge?.remove();
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = `${NS}__badge-dot`;
+      badge.setAttribute('aria-hidden', 'true');
+      link.append(badge);
+    }
+    if (badge.textContent !== unread) badge.textContent = unread;
+  }
+
   function enhanceHeader() {
     const bar = document.querySelector('.top .bar');
     if (!bar) return;
     const mine = bar.querySelector('.nav-mine');
+    const leaderboardHref = routeHref('leaderboard');
+    const inviteHref = routeHref('invite');
     
     // Top right actions
     let actions = bar.querySelector(`.${NS}__top-actions`);
@@ -1518,15 +2500,12 @@
       actions.className = `${NS}__top-actions`;
       actions.setAttribute('aria-label', '快捷入口');
       actions.innerHTML = `
-        <a href="/leaderboard">用户榜单</a>
-        <a href="/invite_code">邀请中心</a>
-        <a href="/notifications" class="${NS}__icon-btn" title="通知与消息">
-          ${getSvg('bell')}
-          <span class="${NS}__badge-dot">3</span>
-        </a>
+        <a href="${escapeAttr(leaderboardHref)}">用户榜单</a>
+        ${inviteHref ? `<a href="${escapeAttr(inviteHref)}">邀请中心</a>` : ''}
       `;
       bar.insertBefore(actions, mine || null);
     }
+    syncHeaderNotification(actions);
 
     if (mine) {
       let wrap = mine.closest(`.${NS}__user-menu-wrap`);
@@ -1536,17 +2515,35 @@
         mine.before(wrap);
         wrap.append(mine);
 
+        // The compact native header can contain a generic placeholder avatar.
+        // Prefer the profile card, which carries the user's actual avatar.
+        const existingImg = document.querySelector('.user-card img.avatar-img, .user-header img.avatar-img, .user-card img, .user-header img') || mine.querySelector('img');
+        const realAvatarSrc = existingImg?.src || 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=token';
+
         let avatar = mine.querySelector(`.${NS}__header-avatar`);
         if (!avatar) {
           avatar = document.createElement('img');
           avatar.className = `${NS}__header-avatar`;
-          avatar.src = 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=token';
+          avatar.src = realAvatarSrc;
           avatar.alt = 'token';
           mine.innerHTML = '';
           mine.append(avatar);
         }
 
-        const isChecked = getValue('checkedIn', false);
+        const dropdownLinks = {
+          topics: routeHref('topics'),
+          replies: routeHref('replies'),
+          favorites: routeHref('favorites'),
+          points: routeHref('points'),
+          notifications: routeHref('notifications'),
+          invite: routeHref('invite'),
+          leaderboard: routeHref('leaderboard'),
+          profile: routeHref('profile'),
+          logout: routeHref('logout')
+        };
+        const dropdownLink = (href, icon, label, extra = '') => href
+          ? `<a href="${escapeAttr(href)}" class="${NS}__ud-item ${extra}">${getSvg(icon)}<span>${label}</span></a>`
+          : '';
         const dropdown = document.createElement('div');
         dropdown.className = `${NS}__user-dropdown`;
         dropdown.innerHTML = `
@@ -1556,31 +2553,38 @@
               <span class="${NS}__ud-badge">吃瓜群众</span>
               <span class="${NS}__ud-level">N</span>
             </div>
-            <div class="${NS}__ud-meta">创作者 · 积分 2500 · 经验 1280</div>
           </div>
           <div class="${NS}__ud-divider"></div>
           <div class="${NS}__ud-group">
-            <a href="/my/topics" class="${NS}__ud-item">${getSvg('document')}<span>我的主题</span><span class="${NS}__ud-count">12</span></a>
-            <a href="/my/replies" class="${NS}__ud-item">${getSvg('chat')}<span>我的回帖</span><span class="${NS}__ud-count">56</span></a>
-            <a href="/favorites" class="${NS}__ud-item">${getSvg('bookmark')}<span>我的收藏</span><span class="${NS}__ud-count">128</span></a>
-            <a href="/my/badges" class="${NS}__ud-item">${getSvg('award')}<span>我的称号</span></a>
-            <a href="/my/points" class="${NS}__ud-item">${getSvg('coin')}<span>我的积分</span></a>
+            ${dropdownLink(dropdownLinks.topics, 'document', '我的主题')}
+            ${dropdownLink(dropdownLinks.replies, 'chat', '我的回帖')}
+            ${dropdownLink(dropdownLinks.favorites, 'bookmark', '我的收藏')}
+            ${dropdownLink(dropdownLinks.points, 'coin', '我的积分')}
           </div>
           <div class="${NS}__ud-divider"></div>
           <div class="${NS}__ud-group">
-            <button type="button" class="${NS}__ud-item" data-lsb-action="checkin">${getSvg('calendar')}<span>每日签到</span><span class="${NS}__ud-tag ${isChecked ? 'is-done' : ''}">${isChecked ? '已签到' : '未签到'}</span></button>
-            <a href="/notifications" class="${NS}__ud-item">${getSvg('bell')}<span>我的通知</span></a>
-            <a href="/invite_code" class="${NS}__ud-item">${getSvg('gift')}<span>邀请中心</span></a>
-            <a href="/leaderboard" class="${NS}__ud-item">${getSvg('chart')}<span>用户榜单</span></a>
+            ${dropdownLink(dropdownLinks.notifications, 'bell', '我的通知')}
+            ${dropdownLink(dropdownLinks.invite, 'gift', '邀请中心')}
+            ${dropdownLink(dropdownLinks.leaderboard, 'chart', '用户榜单')}
             <button type="button" class="${NS}__ud-item" data-lsb-action="toggle-theme">${getSvg('moon')}<span>主题切换</span></button>
           </div>
           <div class="${NS}__ud-divider"></div>
           <div class="${NS}__ud-group">
-            <a href="/settings" class="${NS}__ud-item">${getSvg('gear')}<span>个人设置</span></a>
-            <a href="/logout" class="${NS}__ud-item ${NS}__ud-item--danger">${getSvg('logout')}<span>退出登录</span></a>
+            ${dropdownLink(dropdownLinks.profile, 'gear', '个人设置')}
+            ${dropdownLink(dropdownLinks.logout, 'logout', '退出登录', `${NS}__ud-item--danger`)}
           </div>
         `;
         wrap.append(dropdown);
+      }
+
+      // Keep the header avatar aligned with the profile card after partial page
+      // updates. The site's header placeholder and real profile image may load
+      // at different times.
+      const headerAvatar = wrap.querySelector(`.${NS}__header-avatar`);
+      const profileAvatar = document.querySelector('.user-card img.avatar-img, .user-header img.avatar-img, .user-card img, .user-header img');
+      if (headerAvatar && profileAvatar?.src && headerAvatar.src !== profileAvatar.src) {
+        headerAvatar.src = profileAvatar.src;
+        headerAvatar.alt = profileAvatar.alt || '用户头像';
       }
     }
   }
@@ -1593,20 +2597,37 @@
     // Reconstruct user header
     let userHeader = card.querySelector('.user-header');
     if (userHeader && !userHeader.querySelector(`.${NS}__user-info-top`)) {
-      const avatarImg = userHeader.querySelector('img.avatar-img') || userHeader.querySelector('img');
-      const userNameElem = userHeader.querySelector('.user-name, .username, a[href*="/user/"]');
-      const userName = userNameElem ? userNameElem.textContent.trim() : 'token';
+      const avatarImg = userHeader.querySelector('img.avatar-img') || userHeader.querySelector('img') || document.querySelector('.top .nav-mine img');
+
+      // Extract username safely from candidate elements
+      let userName = '';
+      const nameCandidates = userHeader.querySelectorAll('.user-name, .username, a[href*="/user/"], .nickname, .name, strong, b, span');
+      for (const el of nameCandidates) {
+        const text = el.textContent.replace(/\s+/g, ' ').trim();
+        if (text && !/^[\d\s|:,./]+$/.test(text) && !text.includes('积分') && !text.includes('经验') && !text.includes('吃瓜群众')) {
+          userName = text;
+          break;
+        }
+      }
+      if (!userName) {
+        const navMine = document.querySelector('.top .nav-mine');
+        const navMineText = navMine?.getAttribute('title') || navMine?.getAttribute('aria-label') || navMine?.textContent?.replace(/\s+/g, ' ').trim();
+        if (navMineText && !navMineText.includes('菜单') && !navMineText.includes('通知')) {
+          userName = navMineText;
+        }
+      }
+      if (!userName) userName = 'token';
+
       const realAvatarSrc = avatarImg?.src || 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=token';
       
       userHeader.innerHTML = `
-        <img class="avatar-img" src="${realAvatarSrc}" alt="${userName}">
+        <img class="avatar-img" src="${realAvatarSrc}" alt="${escapeAttr(userName)}">
         <div class="user-info-wrap">
           <div class="${NS}__user-info-top">
-            <span class="user-name">${userName}</span>
+            <span class="user-name">${escapeAttr(userName)}</span>
             <span class="${NS}__user-tag">吃瓜群众</span>
             <span class="${NS}__user-level-badge">N</span>
           </div>
-          <div class="user-rank">积分 2500　|　经验 1280</div>
         </div>
       `;
     }
@@ -1614,6 +2635,7 @@
     if (!loggedOut && !card.querySelector(`.${NS}__profile-stats`)) {
       const sourceActions = [...card.querySelectorAll('.user-actions a, .user-menu a, .user-nav a')];
       const fallbackLabels = ['我的主题', '我的回复', '我的收藏'];
+      const fallbackHrefs = [routeHref('topics'), routeHref('replies'), routeHref('favorites')];
       const defaultCounts = ['12', '56', '128'];
       const stats = document.createElement('div');
       stats.className = `${NS}__profile-stats`;
@@ -1622,8 +2644,10 @@
         const raw = source?.textContent?.trim() || fallback;
         const count = source?.dataset?.count || raw.match(/[\d,.]+/)?.[0] || defaultCounts[index];
         const label = raw.replace(/[\d,.]+/g, '').trim() || fallback;
-        const item = document.createElement('div');
+        const href = source?.getAttribute('href') || fallbackHrefs[index];
+        const item = document.createElement(isUsableHref(href) ? 'a' : 'div');
         item.className = `${NS}__profile-stat`;
+        if (isUsableHref(href)) item.href = href;
         item.innerHTML = `<strong>${count}</strong><span>${label}</span>`;
         stats.append(item);
       });
@@ -1639,6 +2663,14 @@
       button.textContent = loggedOut ? '登录后发帖' : '+ 发布新帖';
       card.append(button);
     }
+
+    // Hide any duplicate native buttons inside or outside user-wrap
+    const rootUserCard = card.closest('.user-card') || card;
+    rootUserCard.querySelectorAll('a[href*="topic"], button, .side-publish, .side-btn, .btn-publish, .create-topic, .side-post').forEach((el) => {
+      if (!el.classList.contains(`${NS}__user-cta`) && !el.classList.contains(`${NS}__profile-stat`)) {
+        el.style.display = 'none';
+      }
+    });
   }
 
   function makeCardHeading(card, titleText, iconKey, actionText, actionHref = '') {
@@ -1658,7 +2690,7 @@
         <span>${titleText}</span>
       </div>
       ${actionHref 
-        ? `<a href="${actionHref}" class="${NS}__card-action"><span>${actionText}</span></a>`
+        ? `<a href="${escapeAttr(actionHref)}" class="${NS}__card-action"><span>${actionText}</span></a>`
         : `<button type="button" class="${NS}__card-action" data-lsb-hot-refresh>${actionText === '换一换' ? getSvg('refresh') : ''}<span>${actionText}</span></button>`
       }
     `;
@@ -1667,26 +2699,103 @@
 
   function enhanceSidebarCards() {
     makeCardHeading(document.querySelector('.daily-hot-topics-card'), '热门话题', 'fire', '换一换');
-    makeCardHeading(document.querySelector('.forum-enhancements-sidebar-card'), '版块统计', 'chart', '查看全部', '/forum_list');
-    makeCardHeading(document.querySelector('.online-users-card'), '活跃用户', 'people', '查看更多', '/users');
+    makeCardHeading(document.querySelector('.forum-enhancements-sidebar-card'), '版块统计', 'chart', '查看全部', routeHref('home'));
+
+    // Ensure active users card exists
+    const sidebar = document.querySelector('.sidebar');
+    let onlineCard = document.querySelector('.sidebar .online-users-card');
+    if (!onlineCard && sidebar) {
+      onlineCard = document.createElement('div');
+      onlineCard.className = 'card sidebar-card online-users-card';
+      onlineCard.innerHTML = `
+        <div class="online-users-wrap">
+          <div class="online-users-grid" id="online-users">
+            <a class="online-users-item" href="${escapeAttr(routeHref('leaderboard'))}"><span class="online-users-avatar"><img class="avatar-img" src="https://api.dicebear.com/9.x/adventurer/svg?seed=Felix" alt="用户"></span></a>
+            <a class="online-users-item" href="${escapeAttr(routeHref('leaderboard'))}"><span class="online-users-avatar"><img class="avatar-img" src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=Trouble" alt="用户"></span></a>
+            <a class="online-users-item" href="${escapeAttr(routeHref('leaderboard'))}"><span class="online-users-avatar"><img class="avatar-img" src="https://api.dicebear.com/9.x/thumbs/svg?seed=Bear" alt="用户"></span></a>
+            <a class="online-users-item" href="${escapeAttr(routeHref('leaderboard'))}"><span class="online-users-avatar"><img class="avatar-img" src="https://api.dicebear.com/9.x/bottts/svg?seed=Gizmo" alt="用户"></span></a>
+            <a class="online-users-item" href="${escapeAttr(routeHref('leaderboard'))}"><span class="online-users-avatar"><img class="avatar-img" src="https://api.dicebear.com/9.x/identicon/svg?seed=Gemini" alt="用户"></span></a>
+            <a class="${NS}__more-users-btn" href="${escapeAttr(routeHref('leaderboard'))}">···</a>
+          </div>
+          <div class="online-users-more">今日 1,256 位用户活跃</div>
+        </div>
+      `;
+      sidebar.append(onlineCard);
+    }
+    if (onlineCard) {
+      makeCardHeading(onlineCard, '活跃用户', 'people', '查看更多', routeHref('leaderboard'));
+    }
+  }
+
+  function enhanceLeftForums() {
+    const panel = document.querySelector(`.${NS}__left-panel`);
+    const sourceCard = document.querySelector(`.sidebar .forum-enhancements-sidebar-card`);
+    const sourceList = sourceCard?.querySelector('.forum-enhancements-sidebar-list');
+    if (!panel || !sourceCard || !sourceList) return;
+
+    sourceCard.classList.add(`${NS}__forum-source`);
+    const signature = [...sourceList.querySelectorAll('a[href]')]
+      .map((link) => `${link.getAttribute('href') || ''}|${link.textContent.replace(/\s+/g, ' ').trim()}`)
+      .join('\u001f');
+    if (!signature) return;
+
+    let section = panel.querySelector(`.${NS}__left-forums`);
+    if (!section) {
+      section = document.createElement('section');
+      section.className = `${NS}__left-forums`;
+      section.innerHTML = `<div class="${NS}__left-forums-title">版块列表</div><div class="${NS}__left-forums-content"></div>`;
+      const signatureCard = panel.querySelector(`.${NS}__signature-card`);
+      panel.insertBefore(section, signatureCard || null);
+    }
+    if (section.dataset.sourceSignature === signature) return;
+
+    const clone = sourceList.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
+    section.querySelector(`.${NS}__left-forums-content`)?.replaceChildren(clone);
+    section.dataset.sourceSignature = signature;
   }
 
   function enhanceToolbar() {
     const search = document.querySelector('.top .search-input');
     if (search) search.placeholder = '搜索帖子、用户、标签或内容...';
-    
-    const toolbar = document.querySelector('.topic-toolbar');
-    if (toolbar && !toolbar.querySelector(`.${NS}__toolbar-filter`)) {
-      const filter = document.createElement('div');
-      filter.className = `${NS}__toolbar-filter`;
-      filter.innerHTML = `<span>最新发布</span><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
-      toolbar.append(filter);
+
+    const tabBar = document.querySelector('.topic-toolbar .tab-bar');
+    if (tabBar) {
+      [...tabBar.querySelectorAll('a[href]')].forEach((tab) => {
+        const label = normalizeLinkLabel(tab.textContent);
+        if (label === '新帖子') tab.textContent = '最新发布';
+        if (label === '新评论') tab.textContent = '最新回复';
+      });
     }
 
-    const tabNames = ['最新发布', '最新回复', '热门', '精华', '抽奖', '发卡', '足迹'];
-    const tabBar = document.querySelector('.topic-toolbar .tab-bar');
-    if (tabBar && tabBar.children.length < tabNames.length) {
-      tabBar.innerHTML = tabNames.map((name, i) => `<a class="tab ${i === 0 ? 'active' : ''}" href="#">${name}</a>`).join('');
+    const toolbar = document.querySelector('.topic-toolbar');
+    if (toolbar && tabBar && !toolbar.querySelector(`.${NS}__toolbar-filter`)) {
+      const seen = new Set();
+      const options = [...tabBar.querySelectorAll('a[href]')].map((tab) => ({
+        label: tab.textContent.trim(),
+        href: tab.getAttribute('href') || '',
+        active: tab.classList.contains('active')
+      })).filter((option) => {
+        const key = `${normalizeLinkLabel(option.label)}|${option.href}`;
+        if (!option.label || !isUsableHref(option.href) || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (options.length) {
+        const selected = options.find((option) => option.active) || options.find((option) => option.label === '最新发布') || options[0];
+        const filter = document.createElement('div');
+        filter.className = `${NS}__toolbar-filter`;
+        filter.innerHTML = `
+          <button type="button" class="${NS}__toolbar-filter-trigger" data-lsb-filter-toggle aria-haspopup="menu" aria-expanded="false">
+            <span>${escapeAttr(selected.label)}</span>
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div class="${NS}__toolbar-filter-menu" role="menu">
+            ${options.map((option) => `<a class="${NS}__toolbar-filter-option ${option.active ? 'is-active' : ''}" href="${escapeAttr(option.href)}" role="menuitem">${escapeAttr(option.label)}</a>`).join('')}
+          </div>`;
+        toolbar.append(filter);
+      }
     }
   }
 
@@ -1709,23 +2818,26 @@
     if (grid && !grid.querySelector(`.${NS}__more-users-btn`)) {
       const moreBtn = document.createElement('a');
       moreBtn.className = `${NS}__more-users-btn`;
-      moreBtn.href = '/users';
+      moreBtn.href = routeHref('leaderboard');
       moreBtn.textContent = '···';
       grid.append(moreBtn);
     }
   }
 
-  const MOCK_VIEWS = ['2.1K', '3.6K', '6.2K', '582', '1.8K', '413', '896', '204', '156', '278'];
-  const MOCK_LIKES = ['32', '78', '103', '12', '54', '8', '26', '6', '9', '14'];
-
   function enhanceTopicRows() {
-    document.querySelectorAll('.post-list > .post-item').forEach((row, index) => {
+    // Detail replies share .post-list/.post-item with the home feed. Keep metrics off reply floors.
+    document.querySelectorAll(`.topic-post-list .${NS}__row-metrics`).forEach((metrics) => metrics.remove());
+    document.querySelectorAll('.forum-main .post-list:not(.topic-post-list) > .post-item').forEach((row, index) => {
       // Reformat meta line
       const meta = row.querySelector('.post-meta');
       if (meta && !meta.querySelector('.meta-author')) {
         const elements = [...meta.children];
         const authorText = elements[0]?.textContent?.trim() || '用户';
         const timeText = elements[elements.length - 1]?.textContent?.trim() || '刚刚';
+        const replyCount = elements
+          .map((element) => element.textContent?.trim() || '')
+          .find((text) => /^\d+$/.test(text)) || '';
+        if (replyCount) row.dataset.lsbReplyCount = replyCount;
         
         meta.innerHTML = `
           <span class="meta-author">${getSvg('user')}${authorText}</span>
@@ -1734,34 +2846,31 @@
         `;
       }
 
-      // Add special tags (only once)
-      const titleRow = row.querySelector('.post-title-row');
-      if (titleRow && !titleRow.classList.contains(`${NS}__tags-added`)) {
-        titleRow.classList.add(`${NS}__tags-added`);
-        if (index === 3) {
-          titleRow.insertAdjacentHTML('beforeend', `<span class="${NS}__tag-hot">热</span><span class="${NS}__tag-unread">未读</span>`);
-        } else if (index === 4 || index === 6) {
-          titleRow.insertAdjacentHTML('beforeend', `<span class="${NS}__tag-lottery">抽奖中</span>`);
-        } else if (index < 3) {
-          titleRow.insertAdjacentHTML('beforeend', `<span class="${NS}__tag-hot">热</span>`);
+      // Add special tags (only in local file preview mode to avoid duplicating live tags)
+      if (location.protocol === 'file:') {
+        const titleRow = row.querySelector('.post-title-row');
+        if (titleRow && !titleRow.classList.contains(`${NS}__tags-added`)) {
+          titleRow.classList.add(`${NS}__tags-added`);
+          if (index === 3) {
+            titleRow.insertAdjacentHTML('beforeend', `<span class="${NS}__tag-hot">热</span><span class="${NS}__tag-unread">未读</span>`);
+          } else if (index === 4 || index === 6) {
+            titleRow.insertAdjacentHTML('beforeend', `<span class="${NS}__tag-lottery">抽奖中</span>`);
+          } else if (index < 3) {
+            titleRow.insertAdjacentHTML('beforeend', `<span class="${NS}__tag-hot">热</span>`);
+          }
         }
       }
 
-      // Metrics columns on the right
+      // Only show the native reply count. The site does not provide views or likes here.
       if (!row.querySelector(`.${NS}__row-metrics`)) {
-        const replyCount = ['46', '51', '91', '24', '174', '12', '22', '0', '4', '9'][index % 10] || '10';
-        const viewCount = MOCK_VIEWS[index % 10] || '1.2K';
-        const likeCount = MOCK_LIKES[index % 10] || '18';
-
-        const metrics = document.createElement('div');
-        metrics.className = `${NS}__row-metrics`;
-        metrics.innerHTML = `
-          <span class="${NS}__row-metric" title="回复数">${getSvg('chat')}<span>${replyCount}</span></span>
-          <span class="${NS}__row-metric" title="浏览量">${getSvg('eye')}<span>${viewCount}</span></span>
-          <span class="${NS}__row-metric" title="点赞数">${getSvg('thumbs-up')}<span>${likeCount}</span></span>
-          <span class="${NS}__row-more-btn" title="更多操作">${getSvg('dots-vertical')}</span>
-        `;
-        row.append(metrics);
+        const replyCount = row.dataset.lsbReplyCount || '';
+        if (replyCount) {
+          const metrics = document.createElement('div');
+          metrics.className = `${NS}__row-metrics`;
+          metrics.dataset.source = 'native';
+          metrics.innerHTML = `<span class="${NS}__row-metric" title="回复数（原站数据）">${getSvg('chat')}<span>${replyCount}</span></span>`;
+          row.append(metrics);
+        }
       }
     });
   }
@@ -1776,23 +2885,56 @@
   }
 
   function openNewTopic() {
-    const original = document.querySelector('a[href*="topic_create"],a[href*="topic/create"],a[href*="topic/add"],.create-topic,.new-topic,[data-create-topic]');
+    const original = document.querySelector('a[href*="topic_edit"],a[href*="topic_create"],a[href*="topic/create"],a[href*="topic/add"],.create-topic,.new-topic,[data-create-topic]');
     if (original && !original.closest(`.${NS}__left`)) { original.click(); return; }
-    const loggedOut = document.querySelector('.user-card .side-auth a[href="/login"],.nav-mine[href="/login"]');
-    location.href = loggedOut ? '/login' : '/topic/create';
+    const loggedOut = document.querySelector('.user-card .side-auth a[href*="login"],.nav-mine[href*="login"]') || !currentUserHref();
+    location.href = loggedOut ? routeHref('login') : routeHref('newTopic');
   }
 
-  function toggleSettings() {
+  function closeSettings() {
     const settings = document.querySelector(`.${NS}__settings`);
     if (!settings) return;
-    const open = settings.classList.toggle('is-open');
-    settings.querySelector(`.${NS}__settings-toggle`)?.setAttribute('aria-expanded', String(open));
+    settings.classList.remove('is-open', 'is-desktop-anchor');
+    settings.style.removeProperty('left');
+    settings.style.removeProperty('top');
+    settings.querySelector(`.${NS}__settings-toggle`)?.setAttribute('aria-expanded', 'false');
+    document.querySelectorAll('[data-lsb-settings]').forEach((button) => button.setAttribute('aria-expanded', 'false'));
+  }
+
+  function closeToolbarFilter() {
+    const filter = document.querySelector(`.${NS}__toolbar-filter.is-open`);
+    if (!filter) return;
+    filter.classList.remove('is-open');
+    filter.querySelector('[data-lsb-filter-toggle]')?.setAttribute('aria-expanded', 'false');
+  }
+
+  function toggleSettings(anchor) {
+    const settings = document.querySelector(`.${NS}__settings`);
+    if (!settings) return;
+    if (settings.classList.contains('is-open')) {
+      closeSettings();
+      return;
+    }
+
+    const desktopAnchor = anchor?.matches?.('[data-lsb-settings]') && !window.matchMedia('(max-width: 720px)').matches;
+    settings.classList.toggle('is-desktop-anchor', desktopAnchor);
+    settings.classList.add('is-open');
+    if (desktopAnchor) {
+      const rect = anchor.getBoundingClientRect();
+      const menu = settings.querySelector(`.${NS}__settings-menu`);
+      const menuHeight = menu?.offsetHeight || 140;
+      settings.style.left = `${Math.min(rect.right + 10, window.innerWidth - 210)}px`;
+      settings.style.top = `${Math.max(8, Math.min(rect.top - 4, window.innerHeight - menuHeight - 8))}px`;
+    }
+    settings.querySelector(`.${NS}__settings-toggle`)?.setAttribute('aria-expanded', 'true');
+    document.querySelectorAll('[data-lsb-settings]').forEach((button) => button.setAttribute('aria-expanded', 'true'));
   }
 
   function teardown() {
     disabled = true;
+    finishBoot();
     observer?.disconnect();
-    document.documentElement.classList.remove(NS, `${NS}--compact`, `${NS}--no-right`);
+    document.documentElement.classList.remove(NS, BOOTING_CLASS, `${NS}--compact`, `${NS}--no-right`);
     document.querySelector(`.${NS}__left`)?.remove();
     document.querySelector(`.${NS}__settings`)?.remove();
     document.querySelector(`.${NS}__footer`)?.remove();
@@ -1803,10 +2945,23 @@
     if (document.body.dataset.lsbModernBound) return;
     document.body.dataset.lsbModernBound = 'true';
     document.addEventListener('click', (event) => {
+      const openSettings = document.querySelector(`.${NS}__settings.is-open`);
+      if (openSettings && !event.target.closest(`.${NS}__settings,[data-lsb-settings]`)) closeSettings();
+      const openFilter = document.querySelector(`.${NS}__toolbar-filter.is-open`);
+      if (openFilter && !event.target.closest(`.${NS}__toolbar-filter`)) closeToolbarFilter();
       const target = event.target.closest('button,a');
       if (!target) return;
+      if (target.hasAttribute('data-lsb-notifications') || isNotificationHref(target.getAttribute('href') || '')) {
+        clearNotificationState();
+      }
+      if (target.hasAttribute('data-lsb-filter-toggle')) {
+        const filter = target.closest(`.${NS}__toolbar-filter`);
+        const open = filter?.classList.toggle('is-open') || false;
+        target.setAttribute('aria-expanded', String(open));
+      }
+      if (target.matches(`.${NS}__toolbar-filter-option`)) closeToolbarFilter();
       if (target.matches('[data-lsb-new]')) openNewTopic();
-      if (target.matches('[data-lsb-settings],.lsb-modern__settings-toggle')) toggleSettings();
+      if (target.matches('[data-lsb-settings],.lsb-modern__settings-toggle')) toggleSettings(target);
       if (target.dataset.lsbAction === 'compact') {
         const next = !document.documentElement.classList.contains(`${NS}--compact`);
         setValue('compact', next); document.documentElement.classList.toggle(`${NS}--compact`, next);
@@ -1820,15 +2975,8 @@
         document.documentElement.setAttribute('data-themes-color-mode', current);
         setValue('themeMode', current);
       }
-      if (target.dataset.lsbAction === 'checkin') {
-        const tag = target.querySelector(`.${NS}__ud-tag`);
-        if (tag) {
-          tag.textContent = '已签到';
-          tag.classList.add('is-done');
-          setValue('checkedIn', true);
-        }
-      }
       if (target.dataset.lsbAction === 'disable') teardown();
+      if (target.closest(`.${NS}__settings-menu`) && target.dataset.lsbAction) closeSettings();
       if (target.hasAttribute('data-lsb-hot-refresh')) {
         const list = document.querySelector('.daily-hot-topics-list');
         if (list?.firstElementChild) list.append(list.firstElementChild);
@@ -1836,6 +2984,12 @@
           const rank = item.querySelector(`.${NS}__hot-rank`);
           if (rank) rank.textContent = String(index + 1);
         });
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        closeSettings();
+        closeToolbarFilter();
       }
     });
   }
@@ -1848,6 +3002,7 @@
     const currentRoute = `${location.pathname}${location.search}`;
     if (currentRoute !== route) {
       route = currentRoute;
+      if (isNotificationHref()) clearNotificationState();
       document.querySelector(`.${NS}__left`)?.remove();
     }
     addStyles();
@@ -1858,6 +3013,7 @@
     enhanceHeader();
     enhanceUserCard();
     enhanceSidebarCards();
+    enhanceLeftForums();
     enhanceToolbar();
     enhanceHotTopics();
     enhanceActiveUsers();
@@ -1865,6 +3021,7 @@
     buildFooter();
     applyPreferences();
     bindEvents();
+    finishBoot();
   }
 
   function schedule() {
@@ -1873,9 +3030,29 @@
     requestAnimationFrame(enhance);
   }
 
+  function observeDocument() {
+    if (observer || disabled) return;
+    const target = document.documentElement;
+    if (!target) {
+      window.setTimeout(observeDocument, 0);
+      return;
+    }
+    if (bootPending) target.classList.add(NS, BOOTING_CLASS);
+    observer = new MutationObserver(schedule);
+    observer.observe(target, {
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['data-notification-count', 'data-unread-count'],
+      subtree: true
+    });
+  }
+
   addStyles();
   enhance();
-  observer = new MutationObserver(schedule);
-  observer.observe(document.body, { childList: true, subtree: true });
+  observeDocument();
+  document.addEventListener('DOMContentLoaded', () => {
+    enhance();
+    if (!document.querySelector('.forum-layout')) finishBoot();
+  }, { once: true });
 })();
-
