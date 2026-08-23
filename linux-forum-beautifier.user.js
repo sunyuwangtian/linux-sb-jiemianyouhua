@@ -484,34 +484,46 @@
       display: grid;
       gap: 4px;
     }
-    .${NS}__nav a, .${NS}__nav button {
+    .${NS}__nav a,
+    .${NS}__nav button,
+    .${NS}__left-panel a,
+    .${NS}__left-panel button {
       min-height: 44px;
-      padding: 0 14px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      border: 0;
-      border-radius: 10px;
-      background: transparent;
-      color: var(--lsbm-secondary);
-      font-size: 14px;
-      font-weight: 500;
-      text-align: left;
-      text-decoration: none;
-      cursor: pointer;
-      transition: all 0.15s ease;
+      padding: 0 14px !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 12px !important;
+      border: 0 !important;
+      outline: 0 !important;
+      box-shadow: none !important;
+      border-radius: 10px !important;
+      background: transparent !important;
+      color: var(--lsbm-secondary) !important;
+      font-size: 14px !important;
+      font-weight: 500 !important;
+      text-align: left !important;
+      text-decoration: none !important;
+      cursor: pointer !important;
+      transition: all 0.15s ease !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
     }
-    .${NS}__nav a:hover, .${NS}__nav button:hover {
-      color: var(--lsbm-accent);
-      background: var(--lsbm-accent-soft);
+    .${NS}__nav a:hover,
+    .${NS}__nav button:hover,
+    .${NS}__left-panel a:hover,
+    .${NS}__left-panel button:hover {
+      color: var(--lsbm-accent) !important;
+      background: var(--lsbm-accent-soft) !important;
     }
-    .${NS}__nav .is-active {
+    .${NS}__nav a.is-active,
+    .${NS}__nav button.is-active {
       color: var(--lsbm-accent) !important;
       background: var(--lsbm-accent-soft) !important;
       font-weight: 700 !important;
     }
-    .${NS}__nav .is-active svg {
-      stroke: var(--lsbm-accent);
+    .${NS}__nav a.is-active svg,
+    .${NS}__nav button.is-active svg {
+      stroke: var(--lsbm-accent) !important;
     }
     .${NS}__separator {
       height: 1px;
@@ -969,22 +981,35 @@
       font-size: 11.5px;
     }
     .${NS}__user-cta {
-      width: 100%;
-      height: 38px;
-      margin-top: 16px;
-      border: 0;
-      border-radius: 8px;
-      background: var(--lsbm-accent);
-      color: #ffffff;
-      font-size: 13.5px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.15s;
+      width: 100% !important;
+      height: 38px !important;
+      margin-top: 16px !important;
+      border: 0 !important;
+      border-radius: 8px !important;
+      background: var(--lsbm-accent) !important;
+      color: #ffffff !important;
+      font-size: 13.5px !important;
+      font-weight: 600 !important;
+      cursor: pointer !important;
+      transition: background 0.15s !important;
+      box-shadow: none !important;
     }
     .${NS}__user-cta:hover {
-      background: var(--lsbm-accent-hover);
+      background: var(--lsbm-accent-hover) !important;
     }
-    html.${NS} .user-actions, html.${NS} .stats-card {
+    /* Hide all extra native actions, menus, duplicate post buttons on live site */
+    html.${NS} .user-card .user-wrap > :not(.user-header):not(.${NS}__profile-stats):not(.${NS}__user-cta),
+    html.${NS} .user-card .user-actions,
+    html.${NS} .user-card .user-menu,
+    html.${NS} .user-card .user-nav,
+    html.${NS} .user-card .side-auth,
+    html.${NS} .user-card .side-publish,
+    html.${NS} .user-card .side-publish-btn,
+    html.${NS} .user-card > a.create-topic,
+    html.${NS} .user-card a[href*="topic_create"],
+    html.${NS} .user-card a[href*="topic/create"],
+    html.${NS} .user-card a[href*="topic/add"],
+    html.${NS} .stats-card {
       display: none !important;
     }
 
@@ -1023,63 +1048,84 @@
     html.${NS} .daily-hot-topics-card {
       order: -9;
     }
-    html.${NS} .daily-hot-topics-head {
+    html.${NS} .daily-hot-topics-head,
+    html.${NS} .daily-hot-topics-card .quick-title,
+    html.${NS} .daily-hot-topics-card .card-head {
       display: none !important;
     }
     html.${NS} .daily-hot-topics-list {
-      display: grid;
-      gap: 8px;
-      padding: 0;
-      margin: 0;
-      list-style: none;
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 6px !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      list-style: none !important;
     }
+    html.${NS} .daily-hot-topics-list > li {
+      margin: 0 !important;
+      padding: 0 !important;
+      list-style: none !important;
+    }
+    html.${NS} .daily-hot-topics-list > li:nth-child(n+6) {
+      display: none !important;
+    }
+    html.${NS} .daily-hot-topics-list > li > a,
     html.${NS} .daily-hot-topics-list a {
-      display: grid !important;
-      grid-template-columns: 20px minmax(0, 1fr) auto;
-      align-items: center;
-      gap: 8px;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      gap: 8px !important;
       padding: 4px 0 !important;
-      text-decoration: none;
-      font-size: 13px;
+      text-decoration: none !important;
+      color: var(--lsbm-text) !important;
+      font-size: 13px !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
     }
-    .${NS}__hot-rank {
-      width: 18px;
-      height: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 4px;
-      background: #f0f2f5;
-      color: var(--lsbm-muted);
-      font-size: 10.5px;
-      font-weight: 750;
+    html.${NS} .daily-hot-topics-list .${NS}__hot-rank {
+      width: 18px !important;
+      height: 18px !important;
+      min-width: 18px !important;
+      flex: 0 0 18px !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      border-radius: 4px !important;
+      background: #8c9ba5 !important;
+      color: #ffffff !important;
+      font-size: 11px !important;
+      font-weight: 700 !important;
+      line-height: 1 !important;
     }
-    html.${NS} .daily-hot-topics-list li:nth-child(1) .${NS}__hot-rank {
-      background: #ff4d4f;
-      color: #fff;
+    html.${NS} .daily-hot-topics-list > li:nth-child(1) .${NS}__hot-rank {
+      background: #ff4d4f !important;
     }
-    html.${NS} .daily-hot-topics-list li:nth-child(2) .${NS}__hot-rank {
-      background: #fa8c16;
-      color: #fff;
+    html.${NS} .daily-hot-topics-list > li:nth-child(2) .${NS}__hot-rank {
+      background: #fa8c16 !important;
     }
-    html.${NS} .daily-hot-topics-list li:nth-child(3) .${NS}__hot-rank {
-      background: #faad14;
-      color: #fff;
+    html.${NS} .daily-hot-topics-list > li:nth-child(3) .${NS}__hot-rank {
+      background: #faad14 !important;
     }
-    html.${NS} .daily-hot-topics-title {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: var(--lsbm-text);
-      font-weight: 500;
+    html.${NS} .daily-hot-topics-list .daily-hot-topics-title,
+    html.${NS} .daily-hot-topics-list a span:not(.${NS}__hot-rank):not(.daily-hot-topics-count) {
+      flex: 1 1 auto !important;
+      min-width: 0 !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
+      color: var(--lsbm-text) !important;
+      font-size: 13px !important;
     }
-    html.${NS} .daily-hot-topics-list a:hover .daily-hot-topics-title {
-      color: var(--lsbm-accent);
+    html.${NS} .daily-hot-topics-list a:hover .daily-hot-topics-title,
+    html.${NS} .daily-hot-topics-list a:hover span:not(.${NS}__hot-rank):not(.daily-hot-topics-count) {
+      color: var(--lsbm-accent) !important;
     }
-    html.${NS} .daily-hot-topics-count {
-      color: var(--lsbm-muted);
-      font-size: 11px;
-      white-space: nowrap;
+    html.${NS} .daily-hot-topics-list .daily-hot-topics-count {
+      flex: 0 0 auto !important;
+      margin-left: auto !important;
+      color: var(--lsbm-muted) !important;
+      font-size: 11.5px !important;
+      white-space: nowrap !important;
     }
 
     /* Forum Stats Grid Card */
@@ -1583,11 +1629,12 @@
   }
 
   function makeCardHeading(card, titleText, iconKey, actionText, actionHref = '') {
-    const wrap = card?.querySelector('.quick-wrap, .online-users-wrap');
-    if (!wrap || wrap.querySelector(`.${NS}__card-heading`)) return;
+    if (!card) return;
+    const wrap = card.querySelector('.daily-hot-topics-wrap, .online-users-wrap, .forum-enhancements-sidebar-wrap, .quick-wrap, .card-wrap') || card;
+    if (wrap.querySelector(`.${NS}__card-heading`)) return;
     
     // Hide old title
-    const oldTitle = wrap.querySelector('.quick-title, .online-users-head, .daily-hot-topics-head');
+    const oldTitle = card.querySelector('.quick-title, .online-users-head, .daily-hot-topics-head, .forum-enhancements-sidebar-head, .card-head');
     if (oldTitle) oldTitle.style.display = 'none';
 
     const heading = document.createElement('div');
@@ -1632,19 +1679,13 @@
 
   function enhanceHotTopics() {
     const items = document.querySelectorAll('.daily-hot-topics-list > li');
-    const mockCounts = ['9.2K', '6.7K', '4.3K', '3.1K', '2.8K'];
     items.forEach((item, index) => {
-      const link = item.querySelector(':scope > a');
+      const link = item.querySelector(':scope > a') || item.querySelector('a');
       if (!link || link.querySelector(`.${NS}__hot-rank`)) return;
       const rank = document.createElement('span');
       rank.className = `${NS}__hot-rank`;
       rank.textContent = String(index + 1);
       link.prepend(rank);
-
-      const count = link.querySelector('.daily-hot-topics-count');
-      if (count) {
-        count.textContent = mockCounts[index] || count.textContent;
-      }
     });
   }
 
