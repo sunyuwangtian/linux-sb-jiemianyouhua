@@ -492,6 +492,7 @@
       padding: 0 14px !important;
       display: flex !important;
       align-items: center !important;
+      justify-content: flex-start !important;
       gap: 12px !important;
       border: 0 !important;
       outline: 0 !important;
@@ -507,6 +508,17 @@
       transition: all 0.15s ease !important;
       width: 100% !important;
       box-sizing: border-box !important;
+    }
+    .${NS}__nav svg,
+    .${NS}__left-panel svg {
+      flex: 0 0 18px !important;
+      width: 18px !important;
+      height: 18px !important;
+      margin: 0 !important;
+    }
+    .${NS}__nav .${NS}__nav-label {
+      flex: 1 1 auto !important;
+      text-align: left !important;
     }
     .${NS}__nav a:hover,
     .${NS}__nav button:hover,
@@ -1437,7 +1449,7 @@
       <div class="${NS}__left-panel">
         <nav class="${NS}__nav">
           ${navItem('/', 'home', '首页', isActive('/'))}
-          <button type="button" data-lsb-new>${getSvg('plus-circle')}<span class="${NS}__nav-label">新帖</span></button>
+          <a href="javascript:void(0)" role="button" data-lsb-new>${getSvg('plus-circle')}<span class="${NS}__nav-label">新帖</span></a>
           ${navItem('/topic_featured', 'star', '精选', isActive('/topic_featured'))}
           <div class="${NS}__separator"></div>
           ${navItem('/forum/4', 'code', '技术交流', isActive('/forum/4'))}
@@ -1446,7 +1458,7 @@
           ${navItem('/forum/9', 'megaphone', '社区公告', isActive('/forum/9'))}
           <div class="${NS}__separator"></div>
           ${navItem('/favorites', 'bookmark', '收藏', isActive('/favorites'))}
-          <button type="button" data-lsb-settings>${getSvg('gear')}<span class="${NS}__nav-label">设置</span></button>
+          <a href="javascript:void(0)" role="button" data-lsb-settings>${getSvg('gear')}<span class="${NS}__nav-label">设置</span></a>
         </nav>
         <div class="${NS}__signature-card">
           <div class="${NS}__signature-logo">${getSvg('bolt')}</div>
