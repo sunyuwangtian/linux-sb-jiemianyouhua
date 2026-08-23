@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.6.3
+// @version      0.6.8
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -783,10 +783,13 @@
     html.${NS} .sidebar .${NS}__forum-source {
       display: none !important;
     }
+    html.${NS} .sidebar .${NS}__quick-source {
+      display: none !important;
+    }
     html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list {
       display: grid !important;
-      grid-template-columns: 1fr !important;
-      gap: 0 !important;
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 5px !important;
       margin: 0 !important;
       padding: 0 !important;
       list-style: none !important;
@@ -798,22 +801,18 @@
       margin: 0 !important;
       padding: 0 !important;
       list-style: none !important;
-      border-bottom: 1px solid color-mix(in srgb, var(--lsbm-line) 72%, transparent) !important;
-    }
-    html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li:last-child {
       border-bottom: 0 !important;
     }
     html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li::before {
       content: "";
       position: absolute;
       z-index: 1;
-      top: 50%;
-      left: 4px;
+      top: 11px;
+      left: 7px;
       width: 5px;
       height: 5px;
       border-radius: 50%;
       background: #1677ff;
-      transform: translateY(-50%);
       pointer-events: none;
     }
     html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li:nth-child(2n)::before { background: #536b95; }
@@ -822,16 +821,16 @@
     html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li:nth-child(7n)::before { background: #9a6548; }
     html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list a {
       width: 100% !important;
-      min-height: 31px !important;
+      min-height: 45px !important;
       margin: 0 !important;
-      padding: 0 4px 0 17px !important;
+      padding: 7px 5px 6px 17px !important;
       display: flex !important;
-      flex-direction: row !important;
-      align-items: center !important;
-      justify-content: flex-start !important;
-      gap: 7px !important;
+      flex-direction: column !important;
+      align-items: flex-start !important;
+      justify-content: center !important;
+      gap: 4px !important;
       border-radius: 6px !important;
-      background: transparent !important;
+      background: var(--lsbm-bg) !important;
       box-sizing: border-box !important;
       text-align: left !important;
     }
@@ -845,7 +844,8 @@
       flex: 1 1 auto !important;
       margin: 0 !important;
       color: var(--lsbm-secondary) !important;
-      font-size: 12px !important;
+      width: 100% !important;
+      font-size: 11.5px !important;
       font-weight: 500 !important;
       line-height: 1.25 !important;
       overflow: hidden !important;
@@ -856,9 +856,9 @@
     html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list a .forum-count,
     html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list a span:last-of-type {
       flex: 0 0 auto !important;
-      margin: 0 0 0 auto !important;
+      margin: 0 !important;
       color: var(--lsbm-muted) !important;
-      font-size: 11px !important;
+      font-size: 10.5px !important;
       font-weight: 400 !important;
       line-height: 1 !important;
     }
@@ -1307,6 +1307,17 @@
     html.${NS} .sidebar {
       display: grid !important;
       gap: 14px !important;
+    }
+    @media (min-width: 981px) {
+      html.${NS} .forum-layout.${NS}__layout > .forum-main,
+      html.${NS} .forum-layout.${NS}__layout > .sidebar,
+      html.${NS} .forum-layout.${NS}__layout > .${NS}__left > .${NS}__left-panel {
+        min-height: calc(100vh - 100px) !important;
+        box-sizing: border-box !important;
+      }
+      html.${NS} .forum-layout.${NS}__layout > .sidebar {
+        align-content: space-between !important;
+      }
     }
     html.${NS} .sidebar > .card {
       margin: 0 !important;
@@ -2262,6 +2273,131 @@
       }
     }
 
+    /* Compact both sticky sidebars when desktop screens are short. */
+    @media (min-width: 981px) and (max-height: 860px) {
+      .${NS}__left-panel {
+        padding: 9px;
+        max-height: calc(100vh - 84px);
+        overflow-y: auto;
+        scrollbar-width: thin;
+      }
+      .${NS}__nav {
+        gap: 1px;
+      }
+      .${NS}__nav a,
+      .${NS}__nav button {
+        min-height: 38px !important;
+      }
+      .${NS}__separator {
+        margin-top: 5px;
+        margin-bottom: 5px;
+      }
+      .${NS}__left-forums {
+        max-height: 238px;
+        margin-top: 8px;
+        margin-bottom: 8px;
+        padding: 8px 6px 6px;
+      }
+      .${NS}__left-forums-title {
+        margin-bottom: 5px;
+        font-size: 12px;
+      }
+      html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list a {
+        min-height: 38px !important;
+        padding-top: 5px !important;
+        padding-bottom: 5px !important;
+        gap: 2px !important;
+      }
+      html.${NS} .${NS}__left-forums .forum-enhancements-sidebar-list > li::before {
+        top: 9px;
+      }
+      .${NS}__signature-card {
+        padding: 7px 9px;
+      }
+      .${NS}__signature-logo {
+        width: 20px;
+        height: 20px;
+        flex-basis: 20px;
+      }
+      html.${NS} .forum-layout.${NS}__layout > .sidebar {
+        max-height: calc(100vh - 84px);
+        gap: 8px !important;
+        overflow-y: auto;
+        scrollbar-width: thin;
+      }
+      html.${NS} .sidebar-card .quick-wrap,
+      html.${NS} .sidebar-card .stats-wrap,
+      html.${NS} .sidebar-card .online-users-wrap {
+        padding: 10px 12px !important;
+      }
+      html.${NS} .user-card .user-wrap {
+        padding: 12px 14px !important;
+      }
+      html.${NS} .user-avatar-big,
+      html.${NS} .user-header .avatar-img,
+      html.${NS} .user-header img {
+        width: 44px !important;
+        height: 44px !important;
+        min-width: 44px !important;
+        max-width: 44px !important;
+        flex-basis: 44px !important;
+      }
+      .${NS}__profile-stats {
+        margin-top: 11px;
+      }
+      .${NS}__profile-stat strong {
+        font-size: 16px;
+      }
+      .${NS}__profile-stat span {
+        margin-top: 2px;
+      }
+      .${NS}__user-cta {
+        height: 34px !important;
+        margin-top: 10px !important;
+      }
+      html.${NS} .daily-hot-topics-card .quick-wrap {
+        padding: 9px 12px !important;
+      }
+      html.${NS} .daily-hot-topics-list > li > a,
+      html.${NS} .daily-hot-topics-list a {
+        min-height: 30px !important;
+        padding-top: 2px !important;
+        padding-bottom: 2px !important;
+      }
+      html.${NS} .online-users-avatar,
+      html.${NS} .online-users-avatar img,
+      html.${NS} .online-users-item,
+      .${NS}__more-users-btn {
+        width: 32px !important;
+        height: 32px !important;
+        min-width: 32px !important;
+        flex-basis: 32px !important;
+      }
+      html.${NS} .online-users-more {
+        margin-top: 6px;
+      }
+      html.${NS} .sidebar .${NS}__invite-card > div {
+        padding-top: 10px !important;
+        padding-bottom: 10px !important;
+      }
+      html.${NS} .sidebar .${NS}__invite-card a,
+      html.${NS} .sidebar .${NS}__invite-card button {
+        min-height: 32px !important;
+      }
+    }
+    @media (min-width: 981px) and (max-height: 720px) {
+      .${NS}__nav a,
+      .${NS}__nav button {
+        min-height: 34px !important;
+      }
+      .${NS}__signature-slogan {
+        display: none;
+      }
+      html.${NS} .daily-hot-topics-list > li:nth-child(5) {
+        display: none !important;
+      }
+    }
+
     @media (max-width: 1240px) {
       html.${NS} .forum-layout.${NS}__layout {
         grid-template-columns: 76px minmax(520px, 1fr) 280px !important;
@@ -2698,6 +2834,16 @@
   }
 
   function enhanceSidebarCards() {
+    [...document.querySelectorAll('.sidebar .card, .sidebar .sidebar-card')].forEach((card) => {
+      const title = normalizeLinkLabel(card.querySelector('.quick-title, .card-title, .card-head')?.textContent);
+      const labels = [...card.querySelectorAll('a, button')].map((item) => normalizeLinkLabel(item.textContent));
+      const quickLabels = ['每日签到', '邀请中心', '用户榜单', '主题切换'];
+      if (title === '快捷功能' || quickLabels.filter((label) => labels.includes(label)).length >= 3) {
+        card.classList.add(`${NS}__quick-source`);
+      } else if (title === '邀请中心' || normalizeLinkLabel(card.textContent).startsWith('邀请中心')) {
+        card.classList.add(`${NS}__invite-card`);
+      }
+    });
     makeCardHeading(document.querySelector('.daily-hot-topics-card'), '热门话题', 'fire', '换一换');
     makeCardHeading(document.querySelector('.forum-enhancements-sidebar-card'), '版块统计', 'chart', '查看全部', routeHref('home'));
 
@@ -2734,7 +2880,11 @@
     if (!panel || !sourceCard || !sourceList) return;
 
     sourceCard.classList.add(`${NS}__forum-source`);
-    const signature = [...sourceList.querySelectorAll('a[href]')]
+    const duplicateLabels = new Set(['技术交流', '资源分享', '求助问答', '社区公告']);
+    const forumLabel = (link) => normalizeLinkLabel(link.textContent).replace(/[\d,.]+$/, '');
+    const sourceLinks = [...sourceList.querySelectorAll('a[href]')]
+      .filter((link) => !duplicateLabels.has(forumLabel(link)));
+    const signature = sourceLinks
       .map((link) => `${link.getAttribute('href') || ''}|${link.textContent.replace(/\s+/g, ' ').trim()}`)
       .join('\u001f');
     if (!signature) return;
@@ -2743,7 +2893,7 @@
     if (!section) {
       section = document.createElement('section');
       section.className = `${NS}__left-forums`;
-      section.innerHTML = `<div class="${NS}__left-forums-title">版块列表</div><div class="${NS}__left-forums-content"></div>`;
+      section.innerHTML = `<div class="${NS}__left-forums-title">更多版块</div><div class="${NS}__left-forums-content"></div>`;
       const signatureCard = panel.querySelector(`.${NS}__signature-card`);
       panel.insertBefore(section, signatureCard || null);
     }
@@ -2752,6 +2902,9 @@
     const clone = sourceList.cloneNode(true);
     clone.removeAttribute('id');
     clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
+    clone.querySelectorAll('a[href]').forEach((link) => {
+      if (duplicateLabels.has(forumLabel(link))) (link.closest('li') || link).remove();
+    });
     section.querySelector(`.${NS}__left-forums-content`)?.replaceChildren(clone);
     section.dataset.sourceSignature = signature;
   }
