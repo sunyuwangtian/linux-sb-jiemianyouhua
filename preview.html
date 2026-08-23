@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN" data-themes-color-mode="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LINUX SB 现代化界面预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f2329; background: #f5f7f9; }
+    a { color: inherit; text-decoration: none; }
+    .top { background: #fff; }
+    .bar { display: flex; align-items: center; }
+    .brand { font-weight: 800; }
+    .search-form { display: flex; }
+    .search-field, .search-input { padding: 8px; }
+    .nav-mine { margin-left: auto; }
+    .forum-layout { display: flex; }
+    .forum-main { flex: 1; }
+    .sidebar { width: 340px; }
+    .post-list, .quick-links, .pagination ul { list-style: none; margin: 0; padding: 0; }
+    .post-item { display: flex; }
+    .post-body { flex: 1; }
+    .post-meta { display: flex; }
+    .card, .main-panel { background: #fff; }
+    .avatar-img { object-fit: cover; }
+    .tab-bar { display: flex; }
+    .tab { padding: 8px; }
+    .topic-badge, .topic-stamp-badge { padding: 2px 6px; }
+    .pinned { background: #e8f7f0; color: #00b96b; }
+    .pagination ul { display: flex; gap: 6px; }
+    .pagination a { display: block; padding: 6px 12px; background: #fff; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div class="bar">
+      <a class="brand" href="/">LINUX SB</a>
+      <form class="search-form">
+        <select class="search-field"><option>标题</option></select>
+        <input class="search-input" placeholder="搜索帖子、用户、标签或内容...">
+        <button class="search-btn" type="submit" aria-label="搜索">搜索</button>
+      </form>
+      <a class="nav-mine" href="/user/1">
+        <img class="avatar-img" src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=token_purple" alt="token">
+      </a>
+    </div>
+  </div>
+
+  <main class="wrap">
+    <div class="home-shell">
+      <div class="forum-layout">
+        <div class="forum-main">
+          <div class="main-panel">
+            <div class="topic-toolbar">
+              <div class="tab-bar">
+                <a class="tab active" href="#">最新发布</a>
+                <a class="tab" href="#">最新回复</a>
+                <a class="tab" href="#">热门</a>
+                <a class="tab" href="#">精华</a>
+                <a class="tab" href="#">抽奖</a>
+                <a class="tab" href="#">发卡</a>
+                <a class="tab" href="#">足迹</a>
+              </div>
+            </div>
+            <ul class="post-list" id="post-list"></ul>
+            <div class="pagination-bar">
+              <div class="pagination">
+                <ul>
+                  <li><a href="#">1</a></li>
+                  <li><a href="#">2</a></li>
+                  <li><a href="#">下一页</a></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="sidebar">
+          <div class="card sidebar-card user-card">
+            <div class="user-wrap">
+              <div class="user-header">
+                <img class="avatar-img" src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=token_purple" alt="token">
+                <div>
+                  <div class="user-name">token</div>
+                  <div class="user-rank">积分 2500　经验 1280</div>
+                </div>
+              </div>
+              <div class="user-actions">
+                <a href="#" data-count="12">我的主题</a>
+                <a href="#" data-count="56">我的回复</a>
+                <a href="#" data-count="128">我的收藏</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="card sidebar-card daily-hot-topics-card">
+            <div class="quick-wrap">
+              <div class="quick-title">热门话题</div>
+              <ul class="quick-links daily-hot-topics-list" id="hot"></ul>
+            </div>
+          </div>
+
+          <div class="card sidebar-card forum-enhancements-sidebar-card">
+            <div class="quick-wrap">
+              <div class="quick-title">版块统计</div>
+              <ul class="quick-links forum-enhancements-sidebar-list" id="forums"></ul>
+            </div>
+          </div>
+
+          <div class="card sidebar-card online-users-card">
+            <div class="online-users-wrap">
+              <div class="online-users-head">
+                <span class="online-users-title">活跃用户</span>
+                <span class="online-users-count">128 人</span>
+              </div>
+              <div class="online-users-grid" id="online-users"></div>
+              <div class="online-users-more">今日 1,256 位用户活跃</div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const topics = [
+      ['panda', '如何才不这么痛苦', '虾仁虾仁', '求助问答', 46, '2分钟前', true, 'hot'],
+      ['purple1', '今日分享原创内容和教程 加精+1000积分', '痛失姓名的站长', '技术交流', 51, '25分钟前', true, 'hot'],
+      ['purple2', '发布真实经验教程 获取积分/投币 以及创作者身份', '痛失姓名的站长', '社区公告', 91, '9小时前', true, 'hot'],
+      ['dog', '评论升级了！', 'Matcha', '技术交流', 24, '刚刚', false, 'hot-unread'],
+      ['stripes', '# 🎁 AI API 体验福利活动继续！（20份体验额度）', 'MX', '福利放送', 174, '刚刚', false, 'lottery'],
+      ['smiley', '论坛的规则，最后大多是为了保护站长自己', 'ulofi', '技术交流', 12, '1分钟前', false, 'none'],
+      ['debug', '【skills分享】debug-log-first —— 让 AI 先看日志，再动手修 Bug', '柏API中转站', '技术交流', 22, '2分钟前', false, 'lottery'],
+      ['gemini', 'Gemini 学生优惠复活了', '学官网', '技术交流', 0, '3分钟前', false, 'none'],
+      ['music', '《毕业歌》', 'HammonD', '资源分享', 4, '3分钟前', false, 'none'],
+      ['bear', '也搞了个飞书主题😀', 'Jink', '技术交流', 9, '3分钟前', false, 'none']
+    ];
+
+    const avatarMap = {
+      'panda': 'https://api.dicebear.com/9.x/adventurer/svg?seed=Felix',
+      'purple1': 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=Trouble',
+      'purple2': 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=Fluffy',
+      'dog': 'https://api.dicebear.com/9.x/avataaars/svg?seed=Chester',
+      'stripes': 'https://api.dicebear.com/9.x/identicon/svg?seed=API',
+      'smiley': 'https://api.dicebear.com/9.x/micah/svg?seed=Aneka',
+      'debug': 'https://api.dicebear.com/9.x/bottts/svg?seed=Gizmo',
+      'gemini': 'https://api.dicebear.com/9.x/identicon/svg?seed=Gemini',
+      'music': 'https://api.dicebear.com/9.x/pixel-art/svg?seed=Jack',
+      'bear': 'https://api.dicebear.com/9.x/thumbs/svg?seed=Bear'
+    };
+
+    document.querySelector('#post-list').innerHTML = topics.map((x, i) => `
+      <li class="post-item ${x[6] ? 'topic-pinned' : ''}">
+        <div class="post-avatar">
+          <img class="avatar-img" src="${avatarMap[x[0]] || 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=' + x[0]}" alt="${x[2]}">
+        </div>
+        <div class="post-body">
+          <div class="post-title-row">
+            ${x[6] ? '<span class="topic-badge pinned">置顶</span>' : ''}
+            <a class="post-title" href="#topic-${i}">${x[1]}</a>
+          </div>
+          <div class="post-meta">
+            <span>${x[2]}</span>
+            <span>${x[4]}</span>
+            <span>${x[5]}</span>
+          </div>
+        </div>
+      </li>
+    `).join('');
+
+    const hotTopics = [
+      ['Linux 内核 6.10 发布', '9.2K'],
+      ['开发者必备的效率工具', '6.7K'],
+      ['Docker 容器网络详解', '4.3K'],
+      ['AI 编程助手对比评测', '3.1K'],
+      ['2024 开发者调查报告', '2.8K']
+    ];
+
+    document.querySelector('#hot').innerHTML = hotTopics.map(x => `
+      <li>
+        <a href="#">
+          <span class="daily-hot-topics-title">${x[0]}</span>
+          <span class="daily-hot-topics-count">${x[1]}</span>
+        </a>
+      </li>
+    `).join('');
+
+    const forums = [
+      ['技术交流', '3,969'],
+      ['资源分享', '295'],
+      ['求助问答', '632'],
+      ['福利放送', '460'],
+      ['深度思考', '98'],
+      ['社区公告', '7']
+    ];
+
+    document.querySelector('#forums').innerHTML = forums.map((x, i) => `
+      <li>
+        <a href="/forum/${i+1}">
+          <span class="forum-enhancements-sidebar-name">${x[0]}</span>
+          <span class="forum-enhancements-sidebar-count">${x[1]}</span>
+        </a>
+      </li>
+    `).join('');
+
+    const activeUsers = [
+      'https://api.dicebear.com/9.x/adventurer/svg?seed=User1',
+      'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=User2',
+      'https://api.dicebear.com/9.x/thumbs/svg?seed=User3',
+      'https://api.dicebear.com/9.x/bottts/svg?seed=User4',
+      'https://api.dicebear.com/9.x/identicon/svg?seed=User5'
+    ];
+
+    document.querySelector('#online-users').innerHTML = activeUsers.map((src, i) => `
+      <a class="online-users-item" href="#">
+        <span class="online-users-avatar"><img class="avatar-img" src="${src}" alt="用户"></span>
+      </a>
+    `).join('');
+  </script>
+  <script src="./linux-forum-beautifier.user.js"></script>
+</body>
+</html>
+
