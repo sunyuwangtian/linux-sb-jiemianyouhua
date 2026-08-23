@@ -1574,19 +1574,20 @@
   }
 
   function enhanceUserCard() {
-    const card = document.querySelector('.sidebar .user-card .user-wrap');
+    const card = document.querySelector('.sidebar .user-card .user-wrap') || document.querySelector('.sidebar .user-card');
     if (!card) return;
-    const loggedOut = Boolean(card.querySelector('.side-auth a[href="/login"]'));
+    const loggedOut = Boolean(card.querySelector('.side-auth a[href="/login"], .side-auth a[href*="login"]'));
 
     // Reconstruct user header
     let userHeader = card.querySelector('.user-header');
     if (userHeader && !userHeader.querySelector(`.${NS}__user-info-top`)) {
       const avatarImg = userHeader.querySelector('img.avatar-img') || userHeader.querySelector('img');
-      const userNameElem = userHeader.querySelector('.user-name');
+      const userNameElem = userHeader.querySelector('.user-name, .username, a[href*="/user/"]');
       const userName = userNameElem ? userNameElem.textContent.trim() : 'token';
+      const realAvatarSrc = avatarImg?.src || 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=token';
       
       userHeader.innerHTML = `
-        <img class="avatar-img" src="${avatarImg ? avatarImg.src : 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=token'}" alt="${userName}">
+        <img class="avatar-img" src="${realAvatarSrc}" alt="${userName}">
         <div class="user-info-wrap">
           <div class="${NS}__user-info-top">
             <span class="user-name">${userName}</span>
@@ -1599,7 +1600,7 @@
     }
 
     if (!loggedOut && !card.querySelector(`.${NS}__profile-stats`)) {
-      const sourceActions = [...card.querySelectorAll('.user-actions a')];
+      const sourceActions = [...card.querySelectorAll('.user-actions a, .user-menu a, .user-nav a')];
       const fallbackLabels = ['我的主题', '我的回复', '我的收藏'];
       const defaultCounts = ['12', '56', '128'];
       const stats = document.createElement('div');
