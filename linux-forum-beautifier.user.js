@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.7.4
+// @version      0.7.6
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -27,7 +27,7 @@
   let routeHrefCache = new Map();
   const prefetchedTopicUrls = new Set();
   const topicPrefetchTimers = new WeakMap();
-  const SHARED_SIDEBAR_CACHE_KEY = `${NS}:shared-sidebar:v1`;
+  const SHARED_SIDEBAR_CACHE_KEY = `${NS}:shared-sidebar:v2`;
   let sharedSidebarFetch = null;
   let sharedSidebarCacheValue = '';
   const middlePageCache = new Map();
@@ -307,7 +307,7 @@
       width: 34px;
       height: 34px;
       flex: 0 0 34px !important;
-      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23f1f2f4'/%3E%3Cpath d='M18.5 6.5 14.2 17.2' fill='none' stroke='%23272a2f' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='m13.1 20.5-2.7 6.7' fill='none' stroke='%23ffb000' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;
+      background: var(--lsbm-brand-icon, url("/app/assets/index.svg")) center/contain no-repeat;
     }
     html.${NS} .top .forum-nav, html.${NS} .top .forum-more-toggle, html.${NS} .forum-more-region {
       display: none !important;
@@ -1787,6 +1787,8 @@
     html.${NS} .online-users-item {
       flex: 0 0 38px;
       min-width: 38px;
+      overflow: hidden;
+      font-size: 0;
       text-decoration: none;
     }
     html.${NS} .online-users-avatar,
@@ -2674,6 +2676,12 @@
   function enhanceHeader() {
     const bar = document.querySelector('.top .bar');
     if (!bar) return;
+    const brand = bar.querySelector('.brand');
+    const sourceIcon = document.querySelector('link[rel~="icon"][href]')?.href
+      || new URL('/app/assets/index.svg', location.href).href;
+    if (brand && brand.style.getPropertyValue('--lsbm-brand-icon') !== `url(${JSON.stringify(sourceIcon)})`) {
+      brand.style.setProperty('--lsbm-brand-icon', `url(${JSON.stringify(sourceIcon)})`);
+    }
     const mine = bar.querySelector('.nav-mine');
     const leaderboardHref = routeHref('leaderboard');
     const inviteHref = routeHref('invite');
@@ -2929,12 +2937,46 @@
   }
 
   function classifySidebarCard(card) {
-    const title = normalizeLinkLabel(card.querySelector('.quick-title, .card-title, .card-head')?.textContent);
+    const title = normalizeLinkLabel(card.querySelector('.quick-title, .card-title, .card-head, .online-users-head')?.textContent);
+    const compactText = normalizeLinkLabel(card.textContent);
     const labels = [...card.querySelectorAll('a, button')].map((item) => normalizeLinkLabel(item.textContent));
     const quickLabels = ['每日签到', '邀请中心', '用户榜单', '主题切换'];
-    if (title === '快捷功能' || quickLabels.filter((label) => labels.includes(label)).length >= 3) {
+    const onlineHeading = [...card.querySelectorAll('.online-users-head,.card-title,.card-head,.quick-title,h2,h3,h4')]
+      .find((node) => /^(?:当前在线|在线用户)/.test(normalizeLinkLabel(node.textContent)));
+    const onlineCount = compactText.match(/(?:当前在线|在线用户)(\d+)人/)?.[1] || '';
+    const sourceOnlineCard = card.classList.contains('online-users-card')
+      || Boolean(onlineHeading)
+      || /^(?:当前在线|在线用户)\d*人?/.test(compactText);
+
+    if (sourceOnlineCard) {
+      card.classList.add('online-users-card');
+      onlineHeading?.classList.add('online-users-head');
+      const userLinks = [...card.querySelectorAll('a[href]')].filter((link) => link.querySelector('img,.avatar-img,[class*="avatar"]'));
+      userLinks.forEach((link) => {
+        link.classList.add('online-users-item');
+        const image = link.querySelector('img,.avatar-img');
+        if (image) image.classList.add('online-users-avatar');
+        const name = link.getAttribute('title') || link.getAttribute('aria-label') || link.textContent.replace(/\s+/g, ' ').trim() || image?.alt || '在线用户';
+        if (!link.getAttribute('title')) link.title = name;
+      });
+      const commonParent = userLinks[0]?.parentElement;
+      if (commonParent && userLinks.every((link) => link.parentElement === commonParent)) {
+        commonParent.classList.add('online-users-grid');
+        commonParent.parentElement?.classList.add('online-users-wrap');
+      }
+      if (onlineCount) {
+        let count = card.querySelector('.online-users-more');
+        if (!count) {
+          count = document.createElement('div');
+          count.className = 'online-users-more';
+          (commonParent?.parentElement || card).append(count);
+        }
+        const countText = `当前 ${onlineCount} 位用户在线`;
+        if (count.textContent !== countText) count.textContent = countText;
+      }
+    } else if (title === '快捷功能' || quickLabels.filter((label) => labels.includes(label)).length >= 3) {
       card.classList.add(`${NS}__quick-source`);
-    } else if (title === '邀请中心' || normalizeLinkLabel(card.textContent).startsWith('邀请中心')) {
+    } else if (title === '邀请中心' || compactText.startsWith('邀请中心')) {
       card.classList.add(`${NS}__invite-card`);
     }
   }
