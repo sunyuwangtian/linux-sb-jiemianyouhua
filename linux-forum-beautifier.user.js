@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.7.6
+// @version      0.7.7
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -120,6 +120,11 @@
 
   function invalidateRouteHrefCache() {
     routeHrefCache = new Map();
+  }
+
+  function sourceBrandIconHref() {
+    return document.querySelector('link[rel~="icon"][href]')?.href
+      || new URL('/app/assets/index.svg', location.href).href;
   }
 
   function isNotificationHref(href = location.href) {
@@ -961,6 +966,13 @@
       width: 24px;
       height: 24px;
       flex: 0 0 24px;
+    }
+    .${NS}__signature-logo img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      object-fit: contain;
     }
     .${NS}__signature-text {
       min-width: 0;
@@ -2591,7 +2603,7 @@
           <button type="button" data-lsb-settings aria-haspopup="menu" aria-expanded="false">${getSvg('gear')}<span class="${NS}__nav-label">设置</span></button>
         </nav>
         <div class="${NS}__signature-card">
-          <div class="${NS}__signature-logo">${getSvg('bolt')}</div>
+          <div class="${NS}__signature-logo"><img src="${escapeAttr(sourceBrandIconHref())}" alt=""></div>
           <div class="${NS}__signature-text">
             <div class="${NS}__signature-name">LINUX SB</div>
             <div class="${NS}__signature-slogan">让技术连接每一位开发者</div>
@@ -2677,11 +2689,12 @@
     const bar = document.querySelector('.top .bar');
     if (!bar) return;
     const brand = bar.querySelector('.brand');
-    const sourceIcon = document.querySelector('link[rel~="icon"][href]')?.href
-      || new URL('/app/assets/index.svg', location.href).href;
+    const sourceIcon = sourceBrandIconHref();
     if (brand && brand.style.getPropertyValue('--lsbm-brand-icon') !== `url(${JSON.stringify(sourceIcon)})`) {
       brand.style.setProperty('--lsbm-brand-icon', `url(${JSON.stringify(sourceIcon)})`);
     }
+    const signatureIcon = document.querySelector(`.${NS}__signature-logo img`);
+    if (signatureIcon && signatureIcon.src !== sourceIcon) signatureIcon.src = sourceIcon;
     const mine = bar.querySelector('.nav-mine');
     const leaderboardHref = routeHref('leaderboard');
     const inviteHref = routeHref('invite');
