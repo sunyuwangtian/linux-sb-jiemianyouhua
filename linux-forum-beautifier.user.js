@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.6.10
+// @version      0.7.3
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -27,6 +27,15 @@
   let routeHrefCache = new Map();
   const prefetchedTopicUrls = new Set();
   const topicPrefetchTimers = new WeakMap();
+  const SHARED_SIDEBAR_CACHE_KEY = `${NS}:shared-sidebar:v1`;
+  let sharedSidebarFetch = null;
+  let sharedSidebarCacheValue = '';
+  const middlePageCache = new Map();
+  let middleNavigationController = null;
+  let middleNavigationSequence = 0;
+  let displayedMiddleUrl = location.href;
+  let historyScrollScheduled = false;
+  let middleNavigationPending = false;
 
   // Apply the theme marker before the first paint so the native layout never flashes.
   document.documentElement?.classList.add(NS, BOOTING_CLASS);
@@ -686,6 +695,9 @@
       border: 0 !important;
       background: transparent !important;
       box-shadow: none !important;
+    }
+    html.${NS} .forum-main.${NS}__middle-loading {
+      cursor: progress;
     }
     html.${NS} .mobile-forum-strip {
       display: none !important;
@@ -1442,6 +1454,31 @@
       flex-shrink: 0 !important;
       margin: 0 !important;
       line-height: 1 !important;
+    }
+    .${NS}__user-points {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 4px !important;
+      min-height: 22px !important;
+      margin-top: 8px !important;
+      padding: 2px 8px !important;
+      border: 1px solid rgba(0, 185, 107, 0.16) !important;
+      border-radius: 999px !important;
+      background: var(--lsbm-accent-soft) !important;
+      color: var(--lsbm-accent) !important;
+      font-size: 11.5px !important;
+      line-height: 1 !important;
+      white-space: nowrap !important;
+    }
+    .${NS}__user-points svg {
+      width: 13px !important;
+      height: 13px !important;
+      flex: 0 0 auto !important;
+    }
+    .${NS}__user-points strong {
+      color: inherit !important;
+      font-size: 12px !important;
+      font-weight: 750 !important;
     }
     html.${NS} .user-rank {
       font-size: 11.5px !important;
@@ -2770,6 +2807,9 @@
     let userHeader = card.querySelector('.user-header');
     if (userHeader && !userHeader.querySelector(`.${NS}__user-info-top`)) {
       const avatarImg = userHeader.querySelector('img.avatar-img') || userHeader.querySelector('img') || document.querySelector('.top .nav-mine img');
+      const nativeRankText = userHeader.querySelector('.user-rank')?.textContent || '';
+      const nativePoints = nativeRankText.match(/积分\s*[:：]?\s*(-?\d+(?:[.,]\d+)*(?:[万kK])?)/)?.[1] || '';
+      if (nativePoints) card.dataset.lsbUserPoints = nativePoints;
 
       // Extract username safely from candidate elements
       let userName = '';
@@ -2800,14 +2840,22 @@
             <span class="${NS}__user-tag">吃瓜群众</span>
             <span class="${NS}__user-level-badge">N</span>
           </div>
+          ${card.dataset.lsbUserPoints ? `<div class="${NS}__user-points" title="当前总积分">${getSvg('coin')}<span>总积分</span><strong>${escapeAttr(card.dataset.lsbUserPoints)}</strong></div>` : ''}
         </div>
       `;
     }
 
     if (!loggedOut) {
+      const notification = nativeNotificationInfo();
       const definitions = [
         { key: 'topics', label: '我的主题', labels: ['我的主题', '主题'] },
-        { key: 'replies', label: '我的回复', labels: ['我的回复', '我的回帖', '回复'] },
+        {
+          key: 'replies',
+          label: '我的回复',
+          labels: [],
+          href: routeHref('replies'),
+          count: notification.count || '0'
+        },
         { key: 'favorites', label: '我的收藏', labels: ['我的收藏', '收藏'] }
       ];
       let stats = card.querySelector(`.${NS}__profile-stats`);
@@ -2816,9 +2864,9 @@
         stats.className = `${NS}__profile-stats`;
         card.querySelector('.user-header')?.insertAdjacentElement('afterend', stats);
       }
-      definitions.forEach(({ key, label, labels }) => {
-        const native = nativeProfileStat(labels);
-        const href = native.href || routeHref(key);
+      definitions.forEach(({ key, label, labels, href: definedHref, count: definedCount }) => {
+        const native = labels.length ? nativeProfileStat(labels) : { href: '', count: '' };
+        const href = definedHref || native.href || routeHref(key);
         let item = stats.querySelector(`[data-lsb-profile-stat="${key}"]`);
         if (!item) {
           item = document.createElement('a');
@@ -2829,11 +2877,12 @@
         }
         if (isUsableHref(href)) item.setAttribute('href', href);
         else item.removeAttribute('href');
-        const value = native.count || '—';
+        const actualCount = definedCount ?? native.count;
+        const value = actualCount || '—';
         const countElement = item.querySelector('strong');
         if (countElement.textContent !== value) countElement.textContent = value;
         item.querySelector('span').textContent = label;
-        item.title = native.count ? `${label}：${native.count}` : `${label}：原站未提供数量`;
+        item.title = actualCount ? `${label}：${actualCount}` : `${label}：原站未提供数量`;
       });
     }
 
@@ -2879,41 +2928,132 @@
     wrap.prepend(heading);
   }
 
-  function enhanceSidebarCards() {
-    [...document.querySelectorAll('.sidebar .card, .sidebar .sidebar-card')].forEach((card) => {
-      const title = normalizeLinkLabel(card.querySelector('.quick-title, .card-title, .card-head')?.textContent);
-      const labels = [...card.querySelectorAll('a, button')].map((item) => normalizeLinkLabel(item.textContent));
-      const quickLabels = ['每日签到', '邀请中心', '用户榜单', '主题切换'];
-      if (title === '快捷功能' || quickLabels.filter((label) => labels.includes(label)).length >= 3) {
-        card.classList.add(`${NS}__quick-source`);
-      } else if (title === '邀请中心' || normalizeLinkLabel(card.textContent).startsWith('邀请中心')) {
-        card.classList.add(`${NS}__invite-card`);
-      }
+  function classifySidebarCard(card) {
+    const title = normalizeLinkLabel(card.querySelector('.quick-title, .card-title, .card-head')?.textContent);
+    const labels = [...card.querySelectorAll('a, button')].map((item) => normalizeLinkLabel(item.textContent));
+    const quickLabels = ['每日签到', '邀请中心', '用户榜单', '主题切换'];
+    if (title === '快捷功能' || quickLabels.filter((label) => labels.includes(label)).length >= 3) {
+      card.classList.add(`${NS}__quick-source`);
+    } else if (title === '邀请中心' || normalizeLinkLabel(card.textContent).startsWith('邀请中心')) {
+      card.classList.add(`${NS}__invite-card`);
+    }
+  }
+
+  function absolutizeElementUrls(root, baseUrl) {
+    root.querySelectorAll('[href],[src],[action]').forEach((node) => {
+      ['href', 'src', 'action'].forEach((attribute) => {
+        const value = node.getAttribute(attribute);
+        if (!value || /^(?:#|data:|javascript:|mailto:|tel:)/i.test(value)) return;
+        try { node.setAttribute(attribute, new URL(value, baseUrl).href); } catch (_) {}
+      });
     });
+  }
+
+  function sharedSidebarIdentity() {
+    return currentUserHref() || 'guest';
+  }
+
+  function sharedSidebarSnapshot(sidebar, baseUrl = document.baseURI) {
+    const cards = [
+      sidebar.querySelector('.online-users-card'),
+      sidebar.querySelector(`.${NS}__invite-card`)
+    ].filter(Boolean);
+    if (!cards.length) return [];
+    return cards.map((card) => {
+      const clone = card.cloneNode(true);
+      clone.querySelectorAll(`.${NS}__card-heading,.${NS}__more-users-btn`).forEach((node) => node.remove());
+      clone.querySelectorAll('.quick-title,.online-users-head,.card-head').forEach((title) => title.style.removeProperty('display'));
+      absolutizeElementUrls(clone, baseUrl);
+      clone.dataset.lsbSharedSidebar = '';
+      return clone.outerHTML;
+    });
+  }
+
+  function cacheSharedSidebar(sidebar) {
+    const cards = sharedSidebarSnapshot(sidebar);
+    if (!cards.length) return;
+    const value = JSON.stringify({ identity: sharedSidebarIdentity(), cards });
+    if (value === sharedSidebarCacheValue) return;
+    try {
+      sessionStorage.setItem(SHARED_SIDEBAR_CACHE_KEY, value);
+      sharedSidebarCacheValue = value;
+    } catch (_) {}
+  }
+
+  function readSharedSidebarCache() {
+    try {
+      const value = sessionStorage.getItem(SHARED_SIDEBAR_CACHE_KEY) || '';
+      const cached = JSON.parse(value || 'null');
+      if (!cached || cached.identity !== sharedSidebarIdentity() || !Array.isArray(cached.cards)) return [];
+      sharedSidebarCacheValue = value;
+      return cached.cards;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function mountSharedSidebarCards(sidebar, cards) {
+    if (!sidebar || !cards.length) return false;
+    const template = document.createElement('template');
+    template.innerHTML = cards.join('');
+    let changed = false;
+    [...template.content.children].forEach((card) => {
+      classifySidebarCard(card);
+      const isOnline = card.classList.contains('online-users-card');
+      const isInvite = card.classList.contains(`${NS}__invite-card`);
+      if ((!isOnline && !isInvite)
+        || (isOnline && sidebar.querySelector('.online-users-card'))
+        || (isInvite && sidebar.querySelector(`.${NS}__invite-card`))) return;
+      sidebar.append(card);
+      changed = true;
+    });
+    return changed;
+  }
+
+  function requestSharedSidebar(sidebar) {
+    if (sharedSidebarFetch || !sidebar) return;
+    const run = async () => {
+      try {
+        const response = await fetch(routeHref('home'), { credentials: 'same-origin' });
+        if (!response.ok) return;
+        const parsed = new DOMParser().parseFromString(await response.text(), 'text/html');
+        const sourceSidebar = parsed.querySelector('.sidebar');
+        if (!sourceSidebar) return;
+        sourceSidebar.querySelectorAll('.card,.sidebar-card').forEach(classifySidebarCard);
+        const cards = sharedSidebarSnapshot(sourceSidebar, response.url);
+        if (!cards.length) return;
+        const value = JSON.stringify({ identity: sharedSidebarIdentity(), cards });
+        try {
+          sessionStorage.setItem(SHARED_SIDEBAR_CACHE_KEY, value);
+          sharedSidebarCacheValue = value;
+        } catch (_) {}
+        mountSharedSidebarCards(sidebar, cards);
+        schedule();
+      } catch (_) {}
+    };
+    sharedSidebarFetch = new Promise((resolve) => {
+      const start = () => run().finally(resolve);
+      if ('requestIdleCallback' in window) window.requestIdleCallback(start, { timeout: 700 });
+      else window.setTimeout(start, 120);
+    });
+  }
+
+  function enhanceSidebarCards() {
+    [...document.querySelectorAll('.sidebar .card, .sidebar .sidebar-card')].forEach(classifySidebarCard);
+    const sidebar = document.querySelector('.sidebar');
+    const homePage = location.pathname === '/';
+    if (sidebar && homePage) {
+      cacheSharedSidebar(sidebar);
+    } else if (sidebar) {
+      mountSharedSidebarCards(sidebar, readSharedSidebarCache());
+      if (!sidebar.querySelector('.online-users-card') || !sidebar.querySelector(`.${NS}__invite-card`)) {
+        requestSharedSidebar(sidebar);
+      }
+    }
     makeCardHeading(document.querySelector('.daily-hot-topics-card'), '热门话题', 'fire', '换一换');
     makeCardHeading(document.querySelector('.forum-enhancements-sidebar-card'), '版块统计', 'chart', '查看全部', routeHref('home'));
 
-    // Ensure active users card exists
-    const sidebar = document.querySelector('.sidebar');
-    let onlineCard = document.querySelector('.sidebar .online-users-card');
-    if (!onlineCard && sidebar) {
-      onlineCard = document.createElement('div');
-      onlineCard.className = 'card sidebar-card online-users-card';
-      onlineCard.innerHTML = `
-        <div class="online-users-wrap">
-          <div class="online-users-grid" id="online-users">
-            <a class="online-users-item" href="${escapeAttr(routeHref('leaderboard'))}"><span class="online-users-avatar"><img class="avatar-img" src="https://api.dicebear.com/9.x/adventurer/svg?seed=Felix" alt="用户"></span></a>
-            <a class="online-users-item" href="${escapeAttr(routeHref('leaderboard'))}"><span class="online-users-avatar"><img class="avatar-img" src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=Trouble" alt="用户"></span></a>
-            <a class="online-users-item" href="${escapeAttr(routeHref('leaderboard'))}"><span class="online-users-avatar"><img class="avatar-img" src="https://api.dicebear.com/9.x/thumbs/svg?seed=Bear" alt="用户"></span></a>
-            <a class="online-users-item" href="${escapeAttr(routeHref('leaderboard'))}"><span class="online-users-avatar"><img class="avatar-img" src="https://api.dicebear.com/9.x/bottts/svg?seed=Gizmo" alt="用户"></span></a>
-            <a class="online-users-item" href="${escapeAttr(routeHref('leaderboard'))}"><span class="online-users-avatar"><img class="avatar-img" src="https://api.dicebear.com/9.x/identicon/svg?seed=Gemini" alt="用户"></span></a>
-            <a class="${NS}__more-users-btn" href="${escapeAttr(routeHref('leaderboard'))}">···</a>
-          </div>
-          <div class="online-users-more">今日 1,256 位用户活跃</div>
-        </div>
-      `;
-      sidebar.append(onlineCard);
-    }
+    const onlineCard = document.querySelector('.sidebar .online-users-card');
     if (onlineCard) {
       makeCardHeading(onlineCard, '活跃用户', 'people', '查看更多', routeHref('leaderboard'));
     }
@@ -3140,6 +3280,125 @@
     document.querySelector('.forum-layout')?.classList.remove(`${NS}__layout`);
   }
 
+  function middleCacheKey(href) {
+    try {
+      const url = new URL(href, location.href);
+      url.hash = '';
+      return url.href;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function rememberMiddlePage(href = displayedMiddleUrl) {
+    const key = middleCacheKey(href);
+    const main = document.querySelector('.forum-main');
+    if (!key || !main) return;
+    middlePageCache.delete(key);
+    middlePageCache.set(key, { main, title: document.title });
+    while (middlePageCache.size > 8) middlePageCache.delete(middlePageCache.keys().next().value);
+  }
+
+  function updateCurrentHistoryScroll() {
+    if (middleNavigationPending || !history.state?.lsbMiddleNavigation) return;
+    history.replaceState({ ...history.state, scrollY: window.scrollY }, '', location.href);
+  }
+
+  function markInitialMiddleHistory() {
+    displayedMiddleUrl = middleCacheKey(location.href) || location.href;
+    history.replaceState({
+      ...(history.state || {}),
+      lsbMiddleNavigation: true,
+      url: displayedMiddleUrl,
+      scrollY: window.scrollY
+    }, '', location.href);
+    rememberMiddlePage(displayedMiddleUrl);
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  }
+
+  function topicLinkForMiddleNavigation(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return null;
+    const link = event.target.closest?.('a[href]');
+    if (!link || link.hasAttribute('download')) return null;
+    let url;
+    try { url = new URL(link.href, location.href); } catch (_) { return null; }
+    if (url.origin !== location.origin || middleCacheKey(url.href) === middleCacheKey(displayedMiddleUrl)) return null;
+    const topicRoute = /\/topic\/[^/?#]+\/?$/i.test(url.pathname)
+      || (url.searchParams.get('a') === 'topic' && Boolean(url.searchParams.get('id')));
+    const topicSurface = link.matches('.post-title,.daily-hot-topics-list a') || topicRoute;
+    return topicSurface && document.querySelector('.forum-main') ? url : null;
+  }
+
+  async function navigateMiddle(href, { push = true, scrollY = 0 } = {}) {
+    const targetUrl = new URL(href, location.href);
+    const targetKey = middleCacheKey(targetUrl.href);
+    if (!targetKey || targetKey === middleCacheKey(displayedMiddleUrl)) return;
+
+    const sequence = ++middleNavigationSequence;
+    middleNavigationController?.abort();
+    const controller = new AbortController();
+    middleNavigationController = controller;
+    if (push) updateCurrentHistoryScroll();
+    middleNavigationPending = true;
+    rememberMiddlePage(displayedMiddleUrl);
+
+    const outgoingMain = document.querySelector('.forum-main');
+    outgoingMain?.classList.add(`${NS}__middle-loading`);
+    let destination = middlePageCache.get(targetKey);
+    let fallbackHref = targetUrl.href;
+    try {
+      if (!destination) {
+        const response = await fetch(targetUrl.href, {
+          credentials: 'same-origin',
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        fallbackHref = response.url || fallbackHref;
+        if (response.redirected && middleCacheKey(response.url) !== targetKey) {
+          if (push) location.assign(response.url);
+          else location.reload();
+          return;
+        }
+        const parsed = new DOMParser().parseFromString(await response.text(), 'text/html');
+        const main = parsed.querySelector('.forum-main');
+        if (!main) throw new Error('目标页面缺少主内容区域');
+        absolutizeElementUrls(main, response.url || targetUrl.href);
+        destination = { main, title: parsed.title || document.title };
+        middlePageCache.set(targetKey, destination);
+      }
+      if (sequence !== middleNavigationSequence) return;
+
+      const currentMain = document.querySelector('.forum-main');
+      if (!currentMain) throw new Error('当前页面缺少主内容区域');
+      destination.main.classList.remove(`${NS}__middle-loading`);
+      currentMain.replaceWith(destination.main);
+      document.title = destination.title;
+      displayedMiddleUrl = targetKey;
+      if (push) {
+        history.pushState({ lsbMiddleNavigation: true, url: targetKey, scrollY: 0 }, '', targetUrl.href);
+      }
+      window.scrollTo(0, Math.max(0, Number(scrollY) || 0));
+      invalidateRouteHrefCache();
+      schedule();
+    } catch (error) {
+      if (error?.name === 'AbortError' || sequence !== middleNavigationSequence) return;
+      if (push) location.assign(fallbackHref);
+      else location.reload();
+    } finally {
+      if (sequence === middleNavigationSequence) {
+        middleNavigationPending = false;
+        document.querySelector('.forum-main')?.classList.remove(`${NS}__middle-loading`);
+      }
+    }
+  }
+
+  function refreshLeftNavigation() {
+    const current = document.querySelector(`.${NS}__left .${NS}__nav`);
+    if (!current) return;
+    const replacement = buildLeft().querySelector(`.${NS}__nav`);
+    if (replacement) current.replaceWith(replacement);
+  }
+
   function bindEvents() {
     if (document.body.dataset.lsbModernBound) return;
     document.body.dataset.lsbModernBound = 'true';
@@ -3232,6 +3491,33 @@
     }, { passive: true });
     document.addEventListener('pointerdown', (event) => prefetchTopic(topicLinkFromEvent(event)), { passive: true });
     document.addEventListener('focusin', (event) => prefetchTopic(topicLinkFromEvent(event)), { passive: true });
+    markInitialMiddleHistory();
+    document.addEventListener('click', (event) => {
+      const url = topicLinkForMiddleNavigation(event);
+      if (!url) return;
+      event.preventDefault();
+      closeSettings();
+      closeToolbarFilter();
+      navigateMiddle(url.href, { push: true });
+    });
+    window.addEventListener('popstate', (event) => {
+      if (!event.state?.lsbMiddleNavigation) {
+        location.reload();
+        return;
+      }
+      navigateMiddle(event.state.url || location.href, {
+        push: false,
+        scrollY: event.state.scrollY || 0
+      });
+    });
+    window.addEventListener('scroll', () => {
+      if (historyScrollScheduled) return;
+      historyScrollScheduled = true;
+      requestAnimationFrame(() => {
+        historyScrollScheduled = false;
+        updateCurrentHistoryScroll();
+      });
+    }, { passive: true });
   }
 
   function enhance() {
@@ -3244,7 +3530,7 @@
       route = currentRoute;
       invalidateRouteHrefCache();
       if (isNotificationHref()) clearNotificationState();
-      document.querySelector(`.${NS}__left`)?.remove();
+      refreshLeftNavigation();
     }
     addStyles();
     document.documentElement.classList.add(NS);
