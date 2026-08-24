@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.7.7
+// @version      0.7.8
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -158,15 +158,22 @@
       if (!notificationHrefSnapshot) notificationHrefSnapshot = routeHref('notifications');
       return { href: notificationHrefSnapshot, count: '' };
     }
-    const nativeLink = nativeAnchors('a[href]').find((link) => {
+    const nativeLinks = nativeAnchors('a[href]').filter((link) => {
       const href = (link.getAttribute('href') || '').replace(/&amp;/g, '&');
       const label = normalizeLinkLabel(link.textContent).replace(/[\d,.+]+$/, '');
       return /[?&]tab=notifications(?:&|$)/.test(href) || ['我的通知', '通知', '我的消息'].includes(label);
     });
-    const nativeBadge = nativeLink?.matches('.notify-badge,[data-notification-count],[data-unread-count]')
-      ? nativeLink
-      : nativeLink?.querySelector('.notify-badge,[data-notification-count],[data-unread-count]')
-        || nativeLink?.parentElement?.querySelector(':scope > .notify-badge,:scope > [data-notification-count],:scope > [data-unread-count]');
+    const badgeSelector = '.notify-badge,[data-notification-count],[data-unread-count]';
+    const nativeBadgeFor = (link) => link?.matches(badgeSelector)
+      ? link
+      : link?.querySelector(badgeSelector)
+        || link?.parentElement?.querySelector(':scope > .notify-badge,:scope > [data-notification-count],:scope > [data-unread-count]');
+
+    // Once the native top-right "我的" link is converted into an avatar, it
+    // still points at the notifications page but no longer contains its badge.
+    // Prefer another matching native link that still carries the unread count.
+    const nativeLink = nativeLinks.find((link) => nativeBadgeFor(link)) || nativeLinks[0];
+    const nativeBadge = nativeBadgeFor(nativeLink);
     const rawCount = nativeBadge?.dataset.notificationCount
       || nativeBadge?.dataset.unreadCount
       || nativeBadge?.textContent
@@ -2639,12 +2646,14 @@
   }
 
   function buildSettings() {
+    const topicNewTab = getValue('topicNewTab', false);
     const node = document.createElement('div');
     node.className = `${NS}__settings`;
     node.innerHTML = `
       <div class="${NS}__settings-menu">
         <button type="button" data-lsb-action="compact">切换紧凑模式</button>
         <button type="button" data-lsb-action="right">显示 / 隐藏右栏</button>
+        <button type="button" data-lsb-action="topic-new-tab" aria-pressed="${topicNewTab}">${topicNewTab ? '✓ ' : ''}帖子在新标签页打开</button>
         <button type="button" data-lsb-action="disable">本页恢复原样</button>
       </div>
       <button type="button" class="${NS}__settings-toggle" aria-label="界面设置" aria-expanded="false">${getSvg('gear')}</button>
@@ -3483,6 +3492,12 @@
         const next = !document.documentElement.classList.contains(`${NS}--no-right`);
         setValue('rightHidden', next); document.documentElement.classList.toggle(`${NS}--no-right`, next);
       }
+      if (target.dataset.lsbAction === 'topic-new-tab') {
+        const next = !getValue('topicNewTab', false);
+        setValue('topicNewTab', next);
+        target.setAttribute('aria-pressed', String(next));
+        target.textContent = `${next ? '✓ ' : ''}帖子在新标签页打开`;
+      }
       if (target.dataset.lsbAction === 'toggle-theme') {
         const current = document.documentElement.getAttribute('data-themes-color-mode') === 'dark' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-themes-color-mode', current);
@@ -3553,6 +3568,10 @@
       event.preventDefault();
       closeSettings();
       closeToolbarFilter();
+      if (getValue('topicNewTab', false)) {
+        window.open(url.href, '_blank', 'noopener');
+        return;
+      }
       navigateMiddle(url.href, { push: true });
     });
     window.addEventListener('popstate', (event) => {
