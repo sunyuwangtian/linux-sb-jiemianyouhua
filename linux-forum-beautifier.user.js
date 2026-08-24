@@ -2716,6 +2716,7 @@
       actions.setAttribute('aria-label', '快捷入口');
       actions.innerHTML = `
         <a href="${escapeAttr(leaderboardHref)}">用户榜单</a>
+        <a href="https://lz.sb/">LZ.SB</a>
         ${inviteHref ? `<a href="${escapeAttr(inviteHref)}">邀请中心</a>` : ''}
       `;
       bar.insertBefore(actions, mine || null);
