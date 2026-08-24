@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.7.3
+// @version      0.7.4
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -295,19 +295,19 @@
       min-width: 170px;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       color: var(--lsbm-text);
-      font-size: 20px;
+      font-size: 17px;
       font-weight: 800;
-      letter-spacing: -0.3px;
+      letter-spacing: -0.2px;
       text-decoration: none;
     }
     html.${NS} .top .brand::before {
       content: "";
-      width: 28px;
-      height: 28px;
-      flex: 0 0 28px !important;
-      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='28' height='28'%3E%3Cdefs%3E%3ClinearGradient id='bolt' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%23fa8c16'/%3E%3Cstop offset='100%25' stop-color='%23faad14'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpolygon points='13 2 3 14 12 14 11 22 21 10 12 10 13 2' fill='url(%23bolt)'/%3E%3C/svg%3E") center/contain no-repeat;
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px !important;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23f1f2f4'/%3E%3Cpath d='M18.5 6.5 14.2 17.2' fill='none' stroke='%23272a2f' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='m13.1 20.5-2.7 6.7' fill='none' stroke='%23ffb000' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;
     }
     html.${NS} .top .forum-nav, html.${NS} .top .forum-more-toggle, html.${NS} .forum-more-region {
       display: none !important;
