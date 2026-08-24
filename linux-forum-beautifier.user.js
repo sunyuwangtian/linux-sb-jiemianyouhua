@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.7.8
+// @version      0.7.9
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -3354,6 +3354,198 @@
     }
   }
 
+  function initializeMiddleQuoteThreads(href = location.href) {
+    const list = document.querySelector('ul.post-list.topic-post-list');
+    if (!list) return;
+    if (typeof list.__lsbModernApplyQuoteThreads === 'function') {
+      list.__lsbModernApplyQuoteThreads();
+      return;
+    }
+
+    const validFloor = (value) => (/^[1-9]\d*$/.test(value || '') ? String(value) : '');
+    const targetUrl = new URL(href, location.href);
+    const targetReplyId = validFloor(targetUrl.searchParams.get('replyid'));
+    const targetFloor = validFloor(targetUrl.searchParams.get('floor'));
+    const visibleLimit = 5;
+    let quoteThreadsScheduled = false;
+
+    const addReference = (row, floor) => {
+      const meta = row.querySelector('.post-meta');
+      if (!meta || meta.querySelector('.quote-threads-reference')) return;
+      const reference = document.createElement('span');
+      reference.className = 'quote-threads-reference';
+      reference.textContent = `回复 #${floor}`;
+      meta.prepend(reference);
+    };
+    const parentFloorFromText = (text) => validFloor(String(text || '').match(/@[^\s#]+\s+#([1-9]\d*)\b/u)?.[1]);
+    const parentFloorFromContent = (row, replyRows) => {
+      for (const link of row.querySelectorAll('.post-content a[href]')) {
+        try {
+          const url = new URL(link.href, location.href);
+          const floor = validFloor(url.searchParams.get('floor'));
+          if (floor) return floor;
+          const replyId = validFloor(url.searchParams.get('replyid') || url.searchParams.get('reply_id'));
+          const replyFloor = replyId ? validFloor(replyRows.get(replyId)?.dataset.floor) : '';
+          if (replyFloor) return replyFloor;
+        } catch (_) {}
+      }
+      return parentFloorFromText(row.querySelector('.post-content')?.textContent);
+    };
+    const normalizeReplyLinks = (row, floorReplyIds = new Map()) => {
+      const replyId = String(row?.id || '').match(/^post-([1-9]\d*)$/)?.[1];
+      if (!replyId) return;
+      row.querySelectorAll('a.post-floor[href],.post-content a[href]').forEach((anchor) => {
+        try {
+          const url = new URL(anchor.href, location.href);
+          const floor = validFloor(url.searchParams.get('floor'));
+          if (!floor) return;
+          const isPostFloor = anchor.classList.contains('post-floor');
+          const targetId = isPostFloor ? replyId : validFloor(floorReplyIds.get(floor));
+          if (!targetId) return;
+          if (!isPostFloor && (url.origin !== location.origin || url.pathname !== location.pathname)) return;
+          url.searchParams.delete('floor');
+          url.searchParams.delete('p');
+          url.searchParams.set('replyid', targetId);
+          anchor.href = url.href;
+        } catch (_) {}
+      });
+    };
+    const renderCollapse = (root, rootRow, branch) => {
+      if (!rootRow || branch.length <= visibleLimit) return;
+      const containsTarget = branch.some((row) => row.classList.contains('post-highlight')
+        || (targetReplyId && row.id === `post-${targetReplyId}`)
+        || (targetFloor && row.dataset.floor === targetFloor));
+      if (containsTarget && rootRow.dataset.quoteThreadsTargetRevealed !== '1') {
+        rootRow.dataset.quoteThreadsExpanded = '1';
+        rootRow.dataset.quoteThreadsTargetRevealed = '1';
+      }
+      const expanded = rootRow.dataset.quoteThreadsExpanded === '1';
+      branch.forEach((row, index) => row.classList.toggle('quote-threads-is-collapsed', !expanded && index >= visibleLimit));
+      if (!expanded) {
+        branch[branch.length - 1].classList.remove('quote-threads-thread-end');
+        branch[visibleLimit - 1].classList.add('quote-threads-thread-end');
+      }
+      const toggleRow = document.createElement('li');
+      toggleRow.className = 'quote-threads-toggle-row';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'quote-threads-toggle';
+      button.dataset.quoteThreadsToggle = root;
+      button.dataset.expanded = expanded ? '1' : '0';
+      button.setAttribute('aria-expanded', String(expanded));
+      button.textContent = expanded ? '收起讨论串' : `展开剩余 ${branch.length - visibleLimit} 条回复`;
+      toggleRow.append(button);
+      (expanded ? branch[branch.length - 1] : branch[visibleLimit - 1]).after(toggleRow);
+    };
+
+    const applyQuoteThreads = () => {
+      quoteThreadsScheduled = false;
+      list.querySelectorAll(':scope > .quote-threads-toggle-row').forEach((row) => row.remove());
+      const rows = [...list.querySelectorAll(':scope > li.post-item.post-entry')];
+      if (rows.length < 2) return;
+      const byFloor = new Map();
+      const replyRows = new Map();
+      const floorReplyIds = new Map();
+      const parents = new Map();
+      const roots = new Map();
+      const branches = new Map();
+      const branchRoots = [];
+
+      rows.forEach((row) => {
+        const floor = validFloor(row.dataset.floor);
+        const replyId = String(row.id || '').match(/^post-([1-9]\d*)$/)?.[1] || '';
+        if (floor) byFloor.set(floor, row);
+        if (replyId) replyRows.set(replyId, row);
+        if (floor && replyId) floorReplyIds.set(floor, replyId);
+        row.classList.remove('quote-threads-child', 'quote-threads-cross-page', 'quote-threads-thread-item', 'quote-threads-thread-end', 'quote-threads-is-collapsed');
+      });
+      rows.forEach((row) => normalizeReplyLinks(row, floorReplyIds));
+      rows.forEach((row) => {
+        const floor = validFloor(row.dataset.floor);
+        let parentFloor = validFloor(row.dataset.quoteThreadsParentFloor);
+        if (!parentFloor) {
+          parentFloor = parentFloorFromContent(row, replyRows);
+          if (parentFloor) row.dataset.quoteThreadsParentFloor = parentFloor;
+        }
+        if (parentFloor) addReference(row, parentFloor);
+        if (!floor || !parentFloor || parentFloor === floor) return;
+        if (byFloor.has(parentFloor)) parents.set(floor, parentFloor);
+        else row.classList.add('quote-threads-cross-page');
+      });
+
+      const rootFloor = (floor) => {
+        if (roots.has(floor)) return roots.get(floor);
+        const trail = [];
+        const seen = new Set();
+        let current = floor;
+        let root = floor;
+        while (!seen.has(current)) {
+          if (roots.has(current)) { root = roots.get(current); break; }
+          seen.add(current);
+          trail.push(current);
+          const parentFloor = parents.get(current);
+          if (!parentFloor) break;
+          current = parentFloor;
+        }
+        trail.forEach((value) => roots.set(value, root));
+        return root;
+      };
+      rows.forEach((row, index) => {
+        const floor = validFloor(row.dataset.floor);
+        const root = floor ? rootFloor(floor) : `@${index}`;
+        if (!branches.has(root)) { branches.set(root, []); branchRoots.push(root); }
+        branches.get(root).push(row);
+      });
+
+      const orderedRows = [];
+      const collapsibleBranches = [];
+      branchRoots.forEach((root) => {
+        const branch = branches.get(root);
+        const rootRow = byFloor.get(root);
+        if (rootRow && branch.length > 1) {
+          branch.forEach((row) => {
+            row.classList.add('quote-threads-thread-item');
+            if (row !== rootRow) row.classList.add('quote-threads-child');
+          });
+          branch[branch.length - 1].classList.add('quote-threads-thread-end');
+          collapsibleBranches.push([root, rootRow, branch]);
+        } else if (branch.length === 1 && branch[0].classList.contains('quote-threads-cross-page')) {
+          branch[0].classList.add('quote-threads-thread-item', 'quote-threads-child', 'quote-threads-thread-end');
+        }
+        orderedRows.push(...branch);
+      });
+      if (!rows.every((row, index) => row === orderedRows[index])) {
+        const fragment = document.createDocumentFragment();
+        orderedRows.forEach((row) => fragment.append(row));
+        list.append(fragment);
+      }
+      collapsibleBranches.forEach(([root, rootRow, branch]) => renderCollapse(root, rootRow, branch));
+    };
+
+    const scheduleQuoteThreads = () => {
+      if (quoteThreadsScheduled) return;
+      quoteThreadsScheduled = true;
+      requestAnimationFrame(() => window.setTimeout(applyQuoteThreads, 0));
+    };
+    list.__lsbModernApplyQuoteThreads = applyQuoteThreads;
+    list.dataset.quoteThreadsCollapseReady = '1';
+    list.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-quote-threads-toggle]');
+      if (!(button instanceof HTMLButtonElement)) return;
+      const root = validFloor(button.dataset.quoteThreadsToggle);
+      const rootRow = root ? list.querySelector(`:scope > li.post-item.post-entry[data-floor="${root}"]`) : null;
+      if (!rootRow) return;
+      rootRow.dataset.quoteThreadsExpanded = button.dataset.expanded === '1' ? '0' : '1';
+      applyQuoteThreads();
+    });
+    new MutationObserver((records) => {
+      const hasNewReply = records.some((record) => [...record.addedNodes]
+        .some((node) => node instanceof HTMLElement && node.matches('li.post-item.post-entry')));
+      if (hasNewReply) scheduleQuoteThreads();
+    }).observe(list, { childList: true });
+    applyQuoteThreads();
+  }
+
   function rememberMiddlePage(href = displayedMiddleUrl) {
     const key = middleCacheKey(href);
     const main = document.querySelector('.forum-main');
@@ -3441,6 +3633,7 @@
       if (push) {
         history.pushState({ lsbMiddleNavigation: true, url: targetKey, scrollY: 0 }, '', targetUrl.href);
       }
+      initializeMiddleQuoteThreads(targetUrl.href);
       window.scrollTo(0, Math.max(0, Number(scrollY) || 0));
       invalidateRouteHrefCache();
       schedule();
