@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.6.8
+// @version      0.6.10
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -24,6 +24,9 @@
   let route = `${location.pathname}${location.search}`;
   let bootPending = true;
   let notificationHrefSnapshot = '';
+  let routeHrefCache = new Map();
+  const prefetchedTopicUrls = new Set();
+  const topicPrefetchTimers = new WeakMap();
 
   // Apply the theme marker before the first paint so the native layout never flashes.
   document.documentElement?.classList.add(NS, BOOTING_CLASS);
@@ -81,6 +84,7 @@
   }
 
   function routeHref(name) {
+    if (routeHrefCache.has(name)) return routeHrefCache.get(name);
     const routes = {
       home: () => findNativeHref(['全部主题', '全部']) || '/',
       featured: () => findNativeHref(['精华', '精选']) || '/topic_featured',
@@ -100,7 +104,13 @@
       login: () => findNativeHref('登录', 'a[href*="login"]') || '/login',
       newTopic: () => findNativeHref(['发布新帖', '发帖'], 'a[href]') || '/topic_edit'
     };
-    return routes[name]?.() || '';
+    const href = routes[name]?.() || '';
+    routeHrefCache.set(name, href);
+    return href;
+  }
+
+  function invalidateRouteHrefCache() {
+    routeHrefCache = new Map();
   }
 
   function isNotificationHref(href = location.href) {
@@ -1965,6 +1975,8 @@
       grid-template-areas: "avatar body" "content content" !important;
       gap: 0 12px !important;
       align-items: start !important;
+      content-visibility: auto;
+      contain-intrinsic-block-size: auto 180px;
     }
     html.${NS} .topic-post-list > .post-entry .post-avatar,
     html.${NS} .topic-post-list > .post-entry .post-avatar .avatar-img,
@@ -2725,6 +2737,30 @@
     }
   }
 
+  function nativeProfileStat(labels) {
+    const wanted = labels.map(normalizeLinkLabel);
+    const candidates = [...document.querySelectorAll(
+      '.user-card .user-links a[href],.user-card .user-actions a[href],.user-card .user-menu a[href],.user-card .user-nav a[href],.feature-links a[href]'
+    )].filter((link) => !link.closest(`.${NS}__profile-stats`));
+    const source = candidates.find((link) => {
+      const label = normalizeLinkLabel(link.textContent).replace(/[\d,.万kK]+$/, '');
+      return wanted.includes(label);
+    });
+    if (!source) return { href: '', count: '' };
+
+    const countNode = source.querySelector('[data-count],[data-total],[data-total-count],.count,.num,.badge,strong,b');
+    const rawCount = source.dataset.count
+      || source.dataset.total
+      || source.dataset.totalCount
+      || countNode?.dataset.count
+      || countNode?.dataset.total
+      || countNode?.dataset.totalCount
+      || countNode?.textContent
+      || source.textContent.replace(/\s+/g, '').replace(new RegExp(wanted.join('|'), 'g'), '');
+    const count = String(rawCount || '').match(/\d+(?:[.,]\d+)*(?:[万kK])?/)?.[0] || '';
+    return { href: source.getAttribute('href') || '', count };
+  }
+
   function enhanceUserCard() {
     const card = document.querySelector('.sidebar .user-card .user-wrap') || document.querySelector('.sidebar .user-card');
     if (!card) return;
@@ -2768,27 +2804,37 @@
       `;
     }
 
-    if (!loggedOut && !card.querySelector(`.${NS}__profile-stats`)) {
-      const sourceActions = [...card.querySelectorAll('.user-actions a, .user-menu a, .user-nav a')];
-      const fallbackLabels = ['我的主题', '我的回复', '我的收藏'];
-      const fallbackHrefs = [routeHref('topics'), routeHref('replies'), routeHref('favorites')];
-      const defaultCounts = ['12', '56', '128'];
-      const stats = document.createElement('div');
-      stats.className = `${NS}__profile-stats`;
-      fallbackLabels.forEach((fallback, index) => {
-        const source = sourceActions[index];
-        const raw = source?.textContent?.trim() || fallback;
-        const count = source?.dataset?.count || raw.match(/[\d,.]+/)?.[0] || defaultCounts[index];
-        const label = raw.replace(/[\d,.]+/g, '').trim() || fallback;
-        const href = source?.getAttribute('href') || fallbackHrefs[index];
-        const item = document.createElement(isUsableHref(href) ? 'a' : 'div');
-        item.className = `${NS}__profile-stat`;
-        if (isUsableHref(href)) item.href = href;
-        item.innerHTML = `<strong>${count}</strong><span>${label}</span>`;
-        stats.append(item);
+    if (!loggedOut) {
+      const definitions = [
+        { key: 'topics', label: '我的主题', labels: ['我的主题', '主题'] },
+        { key: 'replies', label: '我的回复', labels: ['我的回复', '我的回帖', '回复'] },
+        { key: 'favorites', label: '我的收藏', labels: ['我的收藏', '收藏'] }
+      ];
+      let stats = card.querySelector(`.${NS}__profile-stats`);
+      if (!stats) {
+        stats = document.createElement('div');
+        stats.className = `${NS}__profile-stats`;
+        card.querySelector('.user-header')?.insertAdjacentElement('afterend', stats);
+      }
+      definitions.forEach(({ key, label, labels }) => {
+        const native = nativeProfileStat(labels);
+        const href = native.href || routeHref(key);
+        let item = stats.querySelector(`[data-lsb-profile-stat="${key}"]`);
+        if (!item) {
+          item = document.createElement('a');
+          item.className = `${NS}__profile-stat`;
+          item.dataset.lsbProfileStat = key;
+          item.innerHTML = '<strong></strong><span></span>';
+          stats.append(item);
+        }
+        if (isUsableHref(href)) item.setAttribute('href', href);
+        else item.removeAttribute('href');
+        const value = native.count || '—';
+        const countElement = item.querySelector('strong');
+        if (countElement.textContent !== value) countElement.textContent = value;
+        item.querySelector('span').textContent = label;
+        item.title = native.count ? `${label}：${native.count}` : `${label}：原站未提供数量`;
       });
-      const header = card.querySelector('.user-header');
-      header?.insertAdjacentElement('afterend', stats);
     }
 
     if (!card.querySelector(`.${NS}__user-cta`)) {
@@ -3145,6 +3191,47 @@
         closeToolbarFilter();
       }
     });
+
+    // Warm the browser cache while the user is aiming at a topic. This keeps
+    // normal native navigation semantics, but removes a network round trip
+    // from the common hover/click path on desktop and pointer-down on touch.
+    const topicLinkFromEvent = (event) => event.target.closest?.(
+      '.forum-main .post-list:not(.topic-post-list) .post-title[href]'
+    );
+    const prefetchTopic = (link) => {
+      if (!link || prefetchedTopicUrls.size >= 16) return;
+      let url;
+      try {
+        url = new URL(link.href, location.href);
+      } catch (_) {
+        return;
+      }
+      if (url.origin !== location.origin || url.href === location.href || prefetchedTopicUrls.has(url.href)) return;
+      prefetchedTopicUrls.add(url.href);
+      const hint = document.createElement('link');
+      hint.rel = 'prefetch';
+      hint.as = 'document';
+      hint.href = url.href;
+      document.head?.append(hint);
+    };
+    document.addEventListener('pointerover', (event) => {
+      const link = topicLinkFromEvent(event);
+      if (!link || topicPrefetchTimers.has(link)) return;
+      const timer = window.setTimeout(() => {
+        topicPrefetchTimers.delete(link);
+        prefetchTopic(link);
+      }, 70);
+      topicPrefetchTimers.set(link, timer);
+    }, { passive: true });
+    document.addEventListener('pointerout', (event) => {
+      const link = topicLinkFromEvent(event);
+      if (!link || link.contains(event.relatedTarget)) return;
+      const timer = topicPrefetchTimers.get(link);
+      if (timer) window.clearTimeout(timer);
+      topicPrefetchTimers.delete(link);
+    }, { passive: true });
+    document.addEventListener('pointerdown', (event) => prefetchTopic(topicLinkFromEvent(event)), { passive: true });
+    document.addEventListener('focusin', (event) => prefetchTopic(topicLinkFromEvent(event)), { passive: true });
   }
 
   function enhance() {
@@ -3155,6 +3242,7 @@
     const currentRoute = `${location.pathname}${location.search}`;
     if (currentRoute !== route) {
       route = currentRoute;
+      invalidateRouteHrefCache();
       if (isNotificationHref()) clearNotificationState();
       document.querySelector(`.${NS}__left`)?.remove();
     }
@@ -3175,6 +3263,10 @@
     applyPreferences();
     bindEvents();
     finishBoot();
+
+    // Do not let our own idempotent DOM decorations wake the observer and
+    // trigger another full document pass on the next animation frame.
+    observer?.takeRecords();
   }
 
   function schedule() {
@@ -3191,10 +3283,20 @@
       return;
     }
     if (bootPending) target.classList.add(NS, BOOTING_CLASS);
-    observer = new MutationObserver(schedule);
+    observer = new MutationObserver((mutations) => {
+      const hasNativeChange = mutations.some((mutation) => {
+        if (mutation.type === 'attributes') return true;
+        const target = mutation.target.nodeType === Node.ELEMENT_NODE
+          ? mutation.target
+          : mutation.target.parentElement;
+        return !target?.closest?.(`.${NS}__left,.${NS}__top-actions,.${NS}__user-dropdown,.${NS}__settings,.${NS}__footer,.${NS}__card-heading,.${NS}__row-metrics`);
+      });
+      if (!hasNativeChange) return;
+      invalidateRouteHrefCache();
+      schedule();
+    });
     observer.observe(target, {
       childList: true,
-      characterData: true,
       attributes: true,
       attributeFilter: ['data-notification-count', 'data-unread-count'],
       subtree: true
