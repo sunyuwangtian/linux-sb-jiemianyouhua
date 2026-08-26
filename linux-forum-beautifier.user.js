@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.7.9
+// @version      0.8.0
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -102,6 +102,7 @@
       questions: () => findNativeHref('求助问答', '.forum-link[href],a[href*="/forum/"]') || '/forum/5',
       announcements: () => findNativeHref('社区公告', '.forum-link[href],a[href*="/forum/"]') || '/forum/9',
       leaderboard: () => findNativeHref('用户榜单') || '/leaderboard',
+      myPies: () => findNativeHref('我的烧饼', '.top a[href],.user-links a[href],.feature-links a[href],.user-menu a[href],.nav-mine-menu a[href],.user-actions a[href],.quick-actions a[href]'),
       topics: () => findNativeHref(['我的主题', '主题'], '.user-card a[href],.user-menu a[href],.user-actions a[href]') || userTabHref('topics'),
       replies: () => findNativeHref(['我的回复', '我的回帖', '回复'], '.user-card a[href],.user-menu a[href],.user-actions a[href]') || userTabHref('replies'),
       favorites: () => findNativeHref(['我的收藏', '收藏'], '.user-card a[href],.user-menu a[href],.user-actions a[href]') || userTabHref('favorites'),
@@ -2707,6 +2708,7 @@
     const mine = bar.querySelector('.nav-mine');
     const leaderboardHref = routeHref('leaderboard');
     const inviteHref = routeHref('invite');
+    const myPiesHref = routeHref('myPies');
     
     // Top right actions
     let actions = bar.querySelector(`.${NS}__top-actions`);
@@ -2718,6 +2720,7 @@
         <a href="${escapeAttr(leaderboardHref)}">用户榜单</a>
         <a href="https://lz.sb/">LZ.SB</a>
         ${inviteHref ? `<a href="${escapeAttr(inviteHref)}">邀请中心</a>` : ''}
+        ${myPiesHref ? `<a href="${escapeAttr(myPiesHref)}">我的烧饼</a>` : ''}
       `;
       bar.insertBefore(actions, mine || null);
     }
