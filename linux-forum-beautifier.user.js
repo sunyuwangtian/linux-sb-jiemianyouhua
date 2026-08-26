@@ -1647,11 +1647,8 @@
       border-bottom: 1px solid var(--lsbm-line) !important;
       list-style: none !important;
     }
-    html.${NS} .daily-hot-topics-list > li:nth-child(5) {
+    html.${NS} .daily-hot-topics-list > li:last-child {
       border-bottom: 0 !important;
-    }
-    html.${NS} .daily-hot-topics-list > li:nth-child(n+6) {
-      display: none !important;
     }
     html.${NS} .daily-hot-topics-list > li > a,
     html.${NS} .daily-hot-topics-list a {
@@ -1799,13 +1796,14 @@
       display: none !important;
     }
     html.${NS} .online-users-grid {
-      display: flex !important;
+      display: grid !important;
+      grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
       gap: 8px;
       align-items: center;
-      justify-content: space-between;
+      justify-items: center;
     }
     html.${NS} .online-users-item {
-      flex: 0 0 38px;
+      width: 38px;
       min-width: 38px;
       overflow: hidden;
       font-size: 0;
@@ -1817,6 +1815,9 @@
       height: 38px !important;
       border-radius: 50% !important;
       object-fit: cover;
+    }
+    html.${NS} .${NS}__more-users-btn {
+      justify-self: center;
     }
     html.${NS} .online-users-name {
       display: none !important;
@@ -2464,7 +2465,7 @@
       .${NS}__signature-slogan {
         display: none;
       }
-      html.${NS} .daily-hot-topics-list > li:nth-child(5) {
+      html.${NS} .daily-hot-topics-list > li:nth-child(n+6) {
         display: none !important;
       }
     }
