@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.8.0
+// @version      0.8.7
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -103,6 +103,7 @@
       announcements: () => findNativeHref('社区公告', '.forum-link[href],a[href*="/forum/"]') || '/forum/9',
       leaderboard: () => findNativeHref('用户榜单') || '/leaderboard',
       myPies: () => findNativeHref('我的烧饼', '.top a[href],.user-links a[href],.feature-links a[href],.user-menu a[href],.nav-mine-menu a[href],.user-actions a[href],.quick-actions a[href]'),
+      titleCenter: () => findNativeHref('称号中心', '.top a[href],.user-links a[href],.feature-links a[href],.user-menu a[href],.nav-mine-menu a[href],.user-actions a[href],.quick-actions a[href]'),
       topics: () => findNativeHref(['我的主题', '主题'], '.user-card a[href],.user-menu a[href],.user-actions a[href]') || userTabHref('topics'),
       replies: () => findNativeHref(['我的回复', '我的回帖', '回复'], '.user-card a[href],.user-menu a[href],.user-actions a[href]') || userTabHref('replies'),
       favorites: () => findNativeHref(['我的收藏', '收藏'], '.user-card a[href],.user-menu a[href],.user-actions a[href]') || userTabHref('favorites'),
@@ -126,6 +127,12 @@
   function sourceBrandIconHref() {
     return document.querySelector('link[rel~="icon"][href]')?.href
       || new URL('/app/assets/index.svg', location.href).href;
+  }
+
+  function directChildFor(container, node) {
+    if (!container || !node) return null;
+    if (node.parentNode === container) return node;
+    return [...container.children].find((child) => child.contains(node)) || null;
   }
 
   function isNotificationHref(href = location.href) {
@@ -213,6 +220,7 @@
   // SVG Icons
   const SVGS = {
     'home': `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>`,
+    'arrow-left': `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>`,
     'plus-circle': `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>`,
     'star': `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`,
     'code': `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>`,
@@ -295,7 +303,8 @@
     }
     html.${NS} .top .bar {
       position: relative;
-      max-width: var(--lsbm-page);
+      width: calc(100% - 40px) !important;
+      max-width: var(--lsbm-page) !important;
       height: 64px;
       margin: 0 auto;
       padding: 0 20px;
@@ -325,7 +334,15 @@
     html.${NS} .top .forum-nav, html.${NS} .top .forum-more-toggle, html.${NS} .forum-more-region {
       display: none !important;
     }
-    html.${NS} .top .search-form {
+    html.${NS} .top .forum-enhancements-top-menu {
+      display: none !important;
+    }
+    html.${NS} .top .bar-right {
+      display: flex;
+      align-items: center;
+    }
+    html.${NS} .top .search-form,
+    html.${NS} .top .search-page-link {
       position: absolute;
       left: 50%;
       top: 50%;
@@ -353,10 +370,50 @@
       background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='%2386909c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'%3E%3C/line%3E%3C/svg%3E") center/contain no-repeat;
       pointer-events: none;
     }
+    html.${NS} .top .search-page-link::before {
+      content: "";
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 16px;
+      height: 16px;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='%2386909c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'%3E%3C/line%3E%3C/svg%3E") center/contain no-repeat;
+      pointer-events: none;
+    }
     html.${NS} .top .search-form:focus-within {
       background: #ffffff !important;
       border-color: var(--lsbm-accent) !important;
       box-shadow: 0 0 0 3px rgba(0, 185, 107, 0.12);
+    }
+    html.${NS} .top .search-page-link:hover,
+    html.${NS} .top .search-page-link:focus-visible {
+      background: #ffffff !important;
+      border-color: var(--lsbm-accent) !important;
+      box-shadow: 0 0 0 3px rgba(0, 185, 107, 0.12);
+    }
+    html.${NS} .top .search-page-fake-input {
+      display: block;
+      width: 100%;
+      overflow: hidden;
+      color: var(--lsbm-muted) !important;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    html.${NS} .top .search-page-fake-icon {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform: translateY(-50%);
+    }
+    html.${NS} .top .search-page-fake-icon svg {
+      width: 16px;
+      height: 16px;
     }
     html.${NS} .top .search-field {
       display: none !important;
@@ -1185,6 +1242,9 @@
       font-weight: 600 !important;
       text-decoration: none;
     }
+    html.${NS} .post-title:visited {
+      color: var(--lsbm-muted) !important;
+    }
     html.${NS} .post-title:hover {
       color: var(--lsbm-accent) !important;
     }
@@ -1895,6 +1955,36 @@
       border-color: var(--lsbm-accent);
       color: var(--lsbm-accent);
     }
+    .${NS}__topic-return {
+      display: flex;
+      justify-content: flex-start;
+      margin-top: 16px;
+    }
+    .${NS}__topic-return-link {
+      width: 100%;
+      min-height: 40px;
+      padding: 0 16px;
+      box-sizing: border-box;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border: 1px solid var(--lsbm-accent);
+      border-radius: 9px;
+      background: var(--lsbm-accent);
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+    }
+    .${NS}__topic-return-link:hover,
+    .${NS}__topic-return-link:focus-visible {
+      border-color: var(--lsbm-accent-hover);
+      background: var(--lsbm-accent-hover);
+      color: #ffffff;
+      outline: none;
+    }
 
     /* Mobile settings */
     .${NS}__settings {
@@ -2549,6 +2639,11 @@
         grid-template-columns: 40px minmax(0, 1fr) !important;
         padding: 10px !important;
       }
+      .${NS}__topic-return-link {
+        width: 100%;
+        min-height: 44px;
+        box-sizing: border-box;
+      }
       .${NS}__row-metrics {
         display: none;
       }
@@ -2707,9 +2802,12 @@
     const signatureIcon = document.querySelector(`.${NS}__signature-logo img`);
     if (signatureIcon && signatureIcon.src !== sourceIcon) signatureIcon.src = sourceIcon;
     const mine = bar.querySelector('.nav-mine');
+    const actionHost = mine?.closest('.bar-right') || bar;
     const leaderboardHref = routeHref('leaderboard');
     const inviteHref = routeHref('invite');
     const myPiesHref = routeHref('myPies');
+    const titleCenterHref = routeHref('titleCenter');
+    bar.querySelector('.forum-enhancements-top-menu')?.classList.add(`${NS}__native-top-menu`);
     
     // Top right actions
     let actions = bar.querySelector(`.${NS}__top-actions`);
@@ -2720,11 +2818,15 @@
       actions.innerHTML = `
         <a href="${escapeAttr(leaderboardHref)}">用户榜单</a>
         <a href="https://lz.sb/">LZ.SB</a>
+        ${titleCenterHref ? `<a href="${escapeAttr(titleCenterHref)}">称号中心</a>` : ''}
         ${inviteHref ? `<a href="${escapeAttr(inviteHref)}">邀请中心</a>` : ''}
         ${myPiesHref ? `<a href="${escapeAttr(myPiesHref)}">我的烧饼</a>` : ''}
       `;
-      bar.insertBefore(actions, mine || null);
+      // The source header has used both direct and nested user-menu markup.
+      // insertBefore only accepts a direct child as its reference node.
     }
+    const actionReference = directChildFor(actionHost, mine);
+    actionHost.insertBefore(actions, actionReference === actions ? null : actionReference);
     syncHeaderNotification(actions);
 
     if (mine) {
@@ -3150,7 +3252,7 @@
       section.className = `${NS}__left-forums`;
       section.innerHTML = `<div class="${NS}__left-forums-title">更多版块</div><div class="${NS}__left-forums-content"></div>`;
       const signatureCard = panel.querySelector(`.${NS}__signature-card`);
-      panel.insertBefore(section, signatureCard || null);
+      panel.insertBefore(section, directChildFor(panel, signatureCard));
     }
     if (section.dataset.sourceSignature === signature) return;
 
@@ -3281,6 +3383,27 @@
         }
       }
     });
+  }
+
+  function enhanceTopicHomeReturn() {
+    const main = document.querySelector('.forum-main');
+    const list = main?.querySelector('ul.post-list.topic-post-list');
+    if (!main || !list) return;
+
+    let actions = main.querySelector(`.${NS}__topic-return`);
+    if (!actions) {
+      actions = document.createElement('div');
+      actions.className = `${NS}__topic-return`;
+      actions.innerHTML = `<a class="${NS}__topic-return-link" data-lsb-home-return href="${escapeAttr(routeHref('home'))}">${getSvg('arrow-left')}<span>返回首页</span></a>`;
+    } else {
+      const link = actions.querySelector('[data-lsb-home-return]');
+      if (link) link.href = routeHref('home');
+    }
+
+    const bottomPagination = [...main.querySelectorAll('.pagination-bar')]
+      .filter((node) => list.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .at(-1);
+    (bottomPagination || list).insertAdjacentElement('afterend', actions);
   }
 
   function applyPreferences() {
@@ -3594,6 +3717,7 @@
     const targetUrl = new URL(href, location.href);
     const targetKey = middleCacheKey(targetUrl.href);
     if (!targetKey || targetKey === middleCacheKey(displayedMiddleUrl)) return;
+    const fromMiddleUrl = middleCacheKey(displayedMiddleUrl);
 
     const sequence = ++middleNavigationSequence;
     middleNavigationController?.abort();
@@ -3636,7 +3760,12 @@
       document.title = destination.title;
       displayedMiddleUrl = targetKey;
       if (push) {
-        history.pushState({ lsbMiddleNavigation: true, url: targetKey, scrollY: 0 }, '', targetUrl.href);
+        history.pushState({
+          lsbMiddleNavigation: true,
+          url: targetKey,
+          scrollY: 0,
+          fromMiddleUrl
+        }, '', targetUrl.href);
       }
       initializeMiddleQuoteThreads(targetUrl.href);
       window.scrollTo(0, Math.max(0, Number(scrollY) || 0));
@@ -3673,6 +3802,18 @@
       if (!target) return;
       if (target.hasAttribute('data-lsb-notifications') || isNotificationHref(target.getAttribute('href') || '')) {
         clearNotificationState();
+      }
+      if (target.hasAttribute('data-lsb-home-return')) {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        closeSettings();
+        closeToolbarFilter();
+        if (history.state?.fromMiddleUrl) {
+          history.back();
+          return;
+        }
+        navigateMiddle(target.href || routeHref('home'), { push: true });
+        return;
       }
       if (target.hasAttribute('data-lsb-filter-toggle')) {
         const filter = target.closest(`.${NS}__toolbar-filter`);
@@ -3796,35 +3937,44 @@
     scheduled = false;
     if (disabled) return;
     const layout = document.querySelector('.forum-layout');
+    // document-start runs before the forum shell exists. Keep the boot mask
+    // until the first real enhancement pass, instead of flashing native UI.
     if (!layout) return;
-    const currentRoute = `${location.pathname}${location.search}`;
-    if (currentRoute !== route) {
-      route = currentRoute;
-      invalidateRouteHrefCache();
-      if (isNotificationHref()) clearNotificationState();
-      refreshLeftNavigation();
-    }
-    addStyles();
-    document.documentElement.classList.add(NS);
-    layout.classList.add(`${NS}__layout`);
-    if (!layout.querySelector(`:scope>.${NS}__left`)) layout.prepend(buildLeft());
-    if (!document.querySelector(`.${NS}__settings`)) document.body.append(buildSettings());
-    enhanceHeader();
-    enhanceUserCard();
-    enhanceSidebarCards();
-    enhanceLeftForums();
-    enhanceToolbar();
-    enhanceHotTopics();
-    enhanceActiveUsers();
-    enhanceTopicRows();
-    buildFooter();
-    applyPreferences();
-    bindEvents();
-    finishBoot();
+    try {
+      const currentRoute = `${location.pathname}${location.search}`;
+      if (currentRoute !== route) {
+        route = currentRoute;
+        invalidateRouteHrefCache();
+        if (isNotificationHref()) clearNotificationState();
+        refreshLeftNavigation();
+      }
+      addStyles();
+      document.documentElement.classList.add(NS);
+      layout.classList.add(`${NS}__layout`);
+      if (!layout.querySelector(`:scope>.${NS}__left`)) layout.prepend(buildLeft());
+      if (!document.querySelector(`.${NS}__settings`)) document.body.append(buildSettings());
+      enhanceHeader();
+      enhanceUserCard();
+      enhanceSidebarCards();
+      enhanceLeftForums();
+      enhanceToolbar();
+      enhanceHotTopics();
+      enhanceActiveUsers();
+      enhanceTopicRows();
+      enhanceTopicHomeReturn();
+      buildFooter();
+      applyPreferences();
+      bindEvents();
+    } catch (error) {
+      // A source markup change must not leave the native page hidden forever.
+      console.error('[LSB] enhancement failed; keeping the native page visible', error);
+    } finally {
+      finishBoot();
 
-    // Do not let our own idempotent DOM decorations wake the observer and
-    // trigger another full document pass on the next animation frame.
-    observer?.takeRecords();
+      // Do not let our own idempotent DOM decorations wake the observer and
+      // trigger another full document pass on the next animation frame.
+      observer?.takeRecords();
+    }
   }
 
   function schedule() {
