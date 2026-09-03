@@ -31,6 +31,9 @@
   let sharedSidebarFetch = null;
   let sharedSidebarCacheValue = '';
   const middlePageCache = new Map();
+  const profileCountFetches = new Map();
+  const PROFILE_COUNT_CACHE_KEY = `${NS}:profile-counts:v1`;
+  const PROFILE_COUNT_CACHE_TTL = 10 * 60 * 1000;
   let middleNavigationController = null;
   let middleNavigationSequence = 0;
   let displayedMiddleUrl = location.href;
@@ -2966,6 +2969,64 @@
     return { href: source.getAttribute('href') || '', count };
   }
 
+  function profileCountCacheKey() {
+    return `${PROFILE_COUNT_CACHE_KEY}:${sharedSidebarIdentity()}`;
+  }
+
+  function readProfileCountCache() {
+    try {
+      const value = JSON.parse(sessionStorage.getItem(profileCountCacheKey()) || 'null');
+      return value && Date.now() - Number(value.time) < PROFILE_COUNT_CACHE_TTL ? value.counts || {} : {};
+    } catch (_) { return {}; }
+  }
+
+  function writeProfileCountCache(counts) {
+    try {
+      sessionStorage.setItem(profileCountCacheKey(), JSON.stringify({ time: Date.now(), counts }));
+    } catch (_) {}
+  }
+
+  function explicitProfileCount(text, label) {
+    const compact = String(text || '').replace(/\s+/g, '');
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return compact.match(new RegExp(`(?:${escaped})(?:共|总数|数量)?[:：]?([\\d,.]+)`))?.[1]
+      || compact.match(new RegExp(`(?:共|总数|数量)[:：]?([\\d,.]+)(?:个)?${escaped}`))?.[1]
+      || '';
+  }
+
+  async function fetchProfileCounts(stats) {
+    if (!stats || !currentUserHref()) return;
+    const cached = readProfileCountCache();
+    Object.entries(cached).forEach(([key, count]) => {
+      const item = stats.querySelector(`[data-lsb-profile-stat="${key}"] strong`);
+      if (item && count) item.textContent = count;
+    });
+    const pending = ['topics', 'favorites'].filter((key) => !(key in cached));
+    if (!pending.length) return;
+    const requestKey = profileCountCacheKey();
+    if (profileCountFetches.has(requestKey)) return;
+    const task = (async () => {
+      const counts = { ...cached };
+      for (const key of pending) {
+        const href = routeHref(key);
+        if (!isUsableHref(href)) continue;
+        try {
+          const response = await fetch(href, { credentials: 'same-origin' });
+          if (!response.ok) continue;
+          const parsed = new DOMParser().parseFromString(await response.text(), 'text/html');
+          const count = explicitProfileCount(parsed.body?.textContent, key === 'topics' ? '我的主题' : '我的收藏');
+          counts[key] = count;
+        } catch (_) {}
+      }
+      writeProfileCountCache(counts);
+      Object.entries(counts).forEach(([key, count]) => {
+        const item = stats.querySelector(`[data-lsb-profile-stat="${key}"] strong`);
+        if (item && count) item.textContent = count;
+      });
+    })().finally(() => profileCountFetches.delete(requestKey));
+    profileCountFetches.set(requestKey, task);
+  }
+
   function enhanceUserCard() {
     const card = document.querySelector('.sidebar .user-card .user-wrap') || document.querySelector('.sidebar .user-card');
     if (!card) return;
@@ -3052,6 +3113,7 @@
         item.querySelector('span').textContent = label;
         item.title = actualCount ? `${label}：${actualCount}` : `${label}：原站未提供数量`;
       });
+      fetchProfileCounts(stats);
     }
 
     if (!card.querySelector(`.${NS}__user-cta`)) {
