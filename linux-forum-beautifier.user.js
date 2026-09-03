@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.8.8
+// @version      0.8.9
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -3781,6 +3781,15 @@
     while (middlePageCache.size > 8) middlePageCache.delete(middlePageCache.keys().next().value);
   }
 
+  function clearStaleMiddleLoading(root) {
+    if (!root) return;
+    root.classList.remove(`${NS}__middle-loading`);
+    root.querySelectorAll('[aria-busy="true"]').forEach((node) => node.setAttribute('aria-busy', 'false'));
+    root.querySelectorAll('.loading, .is-loading, .load-more-loading, [data-loading="true"]')
+      .forEach((node) => node.classList.remove('loading', 'is-loading', 'load-more-loading'));
+    root.querySelectorAll('[data-loading="true"]').forEach((node) => node.removeAttribute('data-loading'));
+  }
+
   function updateCurrentHistoryScroll() {
     if (middleNavigationPending || !history.state?.lsbMiddleNavigation) return;
     history.replaceState({ ...history.state, scrollY: window.scrollY }, '', location.href);
@@ -3853,6 +3862,7 @@
 
       const currentMain = document.querySelector('.forum-main');
       if (!currentMain) throw new Error('当前页面缺少主内容区域');
+      clearStaleMiddleLoading(destination.main);
       destination.main.classList.remove(`${NS}__middle-loading`);
       currentMain.replaceWith(destination.main);
       document.title = destination.title;
@@ -3906,7 +3916,8 @@
         event.preventDefault();
         closeSettings();
         closeToolbarFilter();
-        if (history.state?.fromMiddleUrl) {
+        const referrerUrl = document.referrer ? new URL(document.referrer, location.href) : null;
+        if (history.state?.fromMiddleUrl || (referrerUrl?.origin === location.origin && referrerUrl.pathname === '/')) {
           history.back();
           return;
         }
@@ -4018,6 +4029,12 @@
     document.addEventListener('click', (event) => {
       const url = topicLinkForMiddleNavigation(event);
       if (!url) return;
+      // On the home topic list, preserve the source site's native navigation.
+      // Its infinite-scroll plugin saves loaded pages and the visible topic
+      // anchor before leaving, then restores both on browser history return.
+      if (location.pathname === '/'
+        && !getValue('topicNewTab', false)
+        && event.target.closest('.forum-main .post-list:not(.topic-post-list)')) return;
       event.preventDefault();
       closeSettings();
       closeToolbarFilter();
@@ -4029,6 +4046,14 @@
     });
     window.addEventListener('popstate', (event) => {
       if (!event.state?.lsbMiddleNavigation) {
+        location.reload();
+        return;
+      }
+      const historyUrl = new URL(event.state.url || location.href, location.href);
+      if (historyUrl.pathname === '/') {
+        // The source infinite-scroll plugin keeps its list and loading state in
+        // a page-lifetime closure. Replacing only .forum-main cannot rebind it,
+        // so re-enter the home history entry once to initialize it correctly.
         location.reload();
         return;
       }
