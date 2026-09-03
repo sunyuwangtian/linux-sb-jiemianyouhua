@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX SB 现代化界面
 // @namespace    https://linux.sb/
-// @version      0.8.7
+// @version      0.8.8
 // @description  将 LINUX SB 重排为现代三栏卡片界面，全面对齐现代设计规范，保留原站登录、发帖、分页和主题功能。
 // @author       You
 // @match        https://linux.sb/*
@@ -103,7 +103,9 @@
       announcements: () => findNativeHref('社区公告', '.forum-link[href],a[href*="/forum/"]') || '/forum/9',
       leaderboard: () => findNativeHref('用户榜单') || '/leaderboard',
       myPies: () => findNativeHref('我的烧饼', '.top a[href],.user-links a[href],.feature-links a[href],.user-menu a[href],.nav-mine-menu a[href],.user-actions a[href],.quick-actions a[href]'),
-      titleCenter: () => findNativeHref('称号中心', '.top a[href],.user-links a[href],.feature-links a[href],.user-menu a[href],.nav-mine-menu a[href],.user-actions a[href],.quick-actions a[href]'),
+      titleCenter: () => findNativeHref('称号中心', '.top a[href],.forum-enhancements-top-menu a[href],.user-links a[href],.feature-links a[href],.user-menu a[href],.nav-mine-menu a[href],.user-actions a[href],.quick-actions a[href]'),
+      taotie: () => findNativeHref(['淘贴中心', '淘帖中心'], '.top a[href],.forum-enhancements-top-menu a[href],.user-links a[href],.feature-links a[href],.user-menu a[href],.nav-mine-menu a[href],.user-actions a[href],.quick-actions a[href]'),
+      verification: () => findNativeHref(['认证中心', '认证'], '.top a[href],.forum-enhancements-top-menu a[href],.user-links a[href],.feature-links a[href],.user-menu a[href],.nav-mine-menu a[href],.user-actions a[href],.quick-actions a[href]'),
       topics: () => findNativeHref(['我的主题', '主题'], '.user-card a[href],.user-menu a[href],.user-actions a[href]') || userTabHref('topics'),
       replies: () => findNativeHref(['我的回复', '我的回帖', '回复'], '.user-card a[href],.user-menu a[href],.user-actions a[href]') || userTabHref('replies'),
       favorites: () => findNativeHref(['我的收藏', '收藏'], '.user-card a[href],.user-menu a[href],.user-actions a[href]') || userTabHref('favorites'),
@@ -347,7 +349,8 @@
       left: 50%;
       top: 50%;
       transform: translate(-50%, -50%);
-      width: min(520px, 36vw) !important;
+      /* Keep the centered search from consuming the right-side shortcuts. */
+      width: min(330px, 24vw) !important;
       height: 38px !important;
       margin: 0 !important;
       display: flex;
@@ -358,6 +361,10 @@
       padding: 0 12px 0 36px !important;
       transition: all 0.2s ease;
       z-index: 10;
+    }
+    /* Some source layouts render both the real form and the page-link trigger. */
+    html.${NS} .top:has(.search-form) .search-page-link {
+      display: none !important;
     }
     html.${NS} .top .search-form::before {
       content: "";
@@ -441,6 +448,19 @@
       opacity: 1;
     }
 
+    /* Keep the source back-to-top control outside the right-rail cards. */
+    html.${NS} .back-to-top,
+    html.${NS} #back-to-top,
+    html.${NS} .scroll-to-top,
+    html.${NS} .go-top,
+    html.${NS} .to-top,
+    html.${NS} [aria-label*="返回顶部"],
+    html.${NS} [title*="返回顶部"] {
+      left: auto !important;
+      right: 22px !important;
+      bottom: 22px !important;
+    }
+
     /* Header Right Actions */
     .${NS}__top-actions {
       order: 3;
@@ -449,6 +469,9 @@
       gap: 12px;
       margin-left: auto;
       white-space: nowrap;
+      position: relative;
+      z-index: 11;
+      background: var(--lsbm-panel);
     }
     .${NS}__top-actions a {
       color: var(--lsbm-secondary);
@@ -2807,6 +2830,8 @@
     const inviteHref = routeHref('invite');
     const myPiesHref = routeHref('myPies');
     const titleCenterHref = routeHref('titleCenter');
+    const taotieHref = routeHref('taotie');
+    const verificationHref = routeHref('verification');
     bar.querySelector('.forum-enhancements-top-menu')?.classList.add(`${NS}__native-top-menu`);
     
     // Top right actions
@@ -2815,16 +2840,22 @@
       actions = document.createElement('nav');
       actions.className = `${NS}__top-actions`;
       actions.setAttribute('aria-label', '快捷入口');
-      actions.innerHTML = `
-        <a href="${escapeAttr(leaderboardHref)}">用户榜单</a>
-        <a href="https://lz.sb/">LZ.SB</a>
-        ${titleCenterHref ? `<a href="${escapeAttr(titleCenterHref)}">称号中心</a>` : ''}
-        ${inviteHref ? `<a href="${escapeAttr(inviteHref)}">邀请中心</a>` : ''}
-        ${myPiesHref ? `<a href="${escapeAttr(myPiesHref)}">我的烧饼</a>` : ''}
-      `;
       // The source header has used both direct and nested user-menu markup.
       // insertBefore only accepts a direct child as its reference node.
     }
+    // The source enhancement menu can arrive after the first pass. Rebuild the
+    // text links on every pass so login-only entries do not remain intermittently
+    // missing after the route cache is invalidated.
+    actions.querySelector('[data-lsb-notifications]')?.remove();
+    actions.innerHTML = `
+      <a href="${escapeAttr(leaderboardHref)}">用户榜单</a>
+      <a href="https://lz.sb/">LZ.SB</a>
+      ${titleCenterHref ? `<a href="${escapeAttr(titleCenterHref)}">称号中心</a>` : ''}
+      ${taotieHref ? `<a href="${escapeAttr(taotieHref)}">淘贴中心</a>` : ''}
+      ${verificationHref ? `<a href="${escapeAttr(verificationHref)}">认证中心</a>` : ''}
+      ${inviteHref ? `<a href="${escapeAttr(inviteHref)}">邀请中心</a>` : ''}
+      ${myPiesHref ? `<a href="${escapeAttr(myPiesHref)}">我的烧饼</a>` : ''}
+    `;
     const actionReference = directChildFor(actionHost, mine);
     actionHost.insertBefore(actions, actionReference === actions ? null : actionReference);
     syncHeaderNotification(actions);
@@ -3126,6 +3157,7 @@
 
   function sharedSidebarSnapshot(sidebar, baseUrl = document.baseURI) {
     const cards = [
+      sidebar.querySelector('.daily-hot-topics-card'),
       sidebar.querySelector('.online-users-card'),
       sidebar.querySelector(`.${NS}__invite-card`)
     ].filter(Boolean);
@@ -3172,7 +3204,9 @@
       classifySidebarCard(card);
       const isOnline = card.classList.contains('online-users-card');
       const isInvite = card.classList.contains(`${NS}__invite-card`);
-      if ((!isOnline && !isInvite)
+      const isHotTopics = card.classList.contains('daily-hot-topics-card');
+      if ((!isHotTopics && !isOnline && !isInvite)
+        || (isHotTopics && sidebar.querySelector('.daily-hot-topics-card'))
         || (isOnline && sidebar.querySelector('.online-users-card'))
         || (isInvite && sidebar.querySelector(`.${NS}__invite-card`))) return;
       sidebar.append(card);
@@ -3217,7 +3251,9 @@
       cacheSharedSidebar(sidebar);
     } else if (sidebar) {
       mountSharedSidebarCards(sidebar, readSharedSidebarCache());
-      if (!sidebar.querySelector('.online-users-card') || !sidebar.querySelector(`.${NS}__invite-card`)) {
+      if (!sidebar.querySelector('.daily-hot-topics-card')
+        || !sidebar.querySelector('.online-users-card')
+        || !sidebar.querySelector(`.${NS}__invite-card`)) {
         requestSharedSidebar(sidebar);
       }
     }
@@ -3814,6 +3850,22 @@
         }
         navigateMiddle(target.href || routeHref('home'), { push: true });
         return;
+      }
+      // Keep section switches inside the current shell. Topic links are
+      // handled by the dedicated middle-navigation listener below.
+      const isShellNavigation = target.matches(`.${NS}__left a, .${NS}__top-actions a`)
+        && !target.matches('.post-title, .daily-hot-topics-list a')
+        && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+      if (isShellNavigation) {
+        let shellUrl;
+        try { shellUrl = new URL(target.href, location.href); } catch (_) { shellUrl = null; }
+        if (shellUrl?.origin === location.origin && middleCacheKey(shellUrl.href)) {
+          event.preventDefault();
+          closeSettings();
+          closeToolbarFilter();
+          navigateMiddle(shellUrl.href, { push: true });
+          return;
+        }
       }
       if (target.hasAttribute('data-lsb-filter-toggle')) {
         const filter = target.closest(`.${NS}__toolbar-filter`);
